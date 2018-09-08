@@ -318,6 +318,21 @@ class fil_finder_2D(BaseInfoMixin):
             raise ValueError("Pad size must be >=0")
         self._pad_size = value
 
+    #RI
+    @property
+    def image(self):
+        return self._image
+    @image.setter
+    def image(self,value):
+        self._image=value
+    #RI
+    @property
+    def beamwidth(self):
+        return self._beamwidth
+    @beamwidth.setter
+    def beamwidth(self,value):
+        self._beamwidth=value
+
     @property
     def skeleton_pad_size(self):
         return self._skeleton_pad_size
@@ -642,7 +657,7 @@ class fil_finder_2D(BaseInfoMixin):
     def analyze_skeletons(self, prune_criteria='all', relintens_thresh=0.2,
                           nbeam_lengths=5, branch_nbeam_lengths=3,
                           skel_thresh=None, branch_thresh=None,
-                          verbose=False, save_png=False):
+                          verbose=False, save_png=False, cubefile=None):
         '''
 
         This function wraps most of the skeleton analysis. Several steps are
@@ -702,6 +717,8 @@ class fil_finder_2D(BaseInfoMixin):
             previous settings.
         save_png : bool, optional
             Saves the plot made in verbose mode. Disabled by default.
+        cubefile: if set, then use the specified cube to calculate lengths
+            in 3D instead of 2D (so far the metric is 1 vel pix = 1 space pix)
 
         Attributes
         ----------
@@ -724,7 +741,9 @@ class fil_finder_2D(BaseInfoMixin):
             The significant branches of the skeletons have their length
             and number of branches in each skeleton stored here.
             The keys are: *filament_branches*, *branch_lengths*
-
+        lengths_2d : if cubefile is set, and lengths are in 3D, then 
+            this will return an additional array of what the lengths
+            would have been in 2D
         '''
 
         if relintens_thresh > 1.0 or relintens_thresh <= 0.0:
@@ -759,11 +778,59 @@ class fil_finder_2D(BaseInfoMixin):
         interpts, hubs, ends, filbranches, labeled_fil_arrays =  \
             pix_identify(isolated_filaments, num)
 
+        # added functionality to calculate lengths in 3D if cubefile is set:
+        if cubefile==None:
+            cubefile=""
+        if os.path.exists(cubefile):
+            # making the graph?
+            from astropy.io import fits
+            cubedata=fits.getdata(cubefile)
+            cubedata[np.isnan(cubedata)]=0. # RI protect
+            scube=cubedata.shape
+            simg=self.image.shape
+            # casa 4d
+            if scube[0]==1:
+                scube=scube[1:]
+                cubedata=cubedata[0]
+            print "SCUBE:",simg,scube
+            if len(scube)!=3:
+                print "not a cube?!"
+                stop
+            if not (simg[-1]==scube[-1] and simg[-2]==scube[-2]):
+                print "cube and flat image not consistent"
+                stop
+
+            import pylab as pl
+            s=self.skeleton.shape
+            self.vskeleton=pl.zeros(s)-1
+        
+            # very simple drape: vskeleton = z pix of max(x,y)
+            sz=pl.where(self.skeleton>0)
+            blarg=pl.nanargmax(cubedata,axis=0)
+            self.vskeleton[sz[0],sz[1]]=blarg[sz[0],sz[1]]
+
+        else:
+            self.vskeleton=[]
+            vskel_arrays=[]
+            print "no cube"
+
+        # pass vskeleton - if its empty, nothing happens, 
+        # if its set, length::init_lengths will calculate lengths in 3D
+        # and add length_2d to the properties dict.
         self.branch_properties = init_lengths(
-            labeled_fil_arrays, filbranches, self.array_offsets, self.image)
+            labeled_fil_arrays, filbranches, self.array_offsets, self.image, skel_pad_size=self.skeleton_pad_size, vskel=self.vskeleton)
+
         # Add the number of branches onto the dictionary
         self.branch_properties["number"] = filbranches
 
+        # the graph operations are ok in 3D b/c they use the 
+        # lengths that are already calculated
+        # weight=[1] of 4 elt array ((x,
+        #                          path_weighting(x - 1, lengths[n],
+        #                                         branch_intensity[n]),
+        #                          lengths[n][x - 1],
+        #                          branch_intensity[n][x - 1]))
+        # path_weigthing = default relative wt of len and intens is 0.5
         edge_list, nodes, loop_edges = pre_graph(
             labeled_fil_arrays, self.branch_properties, interpts, ends)
 
@@ -774,6 +841,8 @@ class fil_finder_2D(BaseInfoMixin):
                          save_name=self.save_name,
                          skeleton_arrays=labeled_fil_arrays)
 
+        # TODO make length::prune_graph prune length_2d - may have to add that
+        # to edges to get it to work 
         updated_lists = \
             prune_graph(G, nodes, edge_list, max_path, labeled_fil_arrays,
                         self.branch_properties, loop_edges,
@@ -784,6 +853,7 @@ class fil_finder_2D(BaseInfoMixin):
         labeled_fil_arrays, edge_list, nodes, self.branch_properties = \
             updated_lists
 
+        # TODO this probably needs 3d modification but is it used for anything?
         self.filament_extents = extremum_pts(labeled_fil_arrays,
                                              extremum, ends)
 
@@ -792,7 +862,8 @@ class fil_finder_2D(BaseInfoMixin):
                                     self.branch_properties["length"],
                                     self.imgscale,
                                     verbose=verbose, save_png=save_png,
-                                    save_name=self.save_name)
+                                    save_name=self.save_name,
+                                    vskel=self.vskeleton, array_offsets=self.array_offsets)
 
         self.lengths, self.filament_arrays["long path"] = length_output
         # Convert lengths to numpy array
@@ -805,16 +876,19 @@ class fil_finder_2D(BaseInfoMixin):
 
         self.labelled_filament_arrays = labeled_fil_arrays
 
-        # Convert branch lengths physical units
-        for n in range(self.number_of_filaments):
-            lengths = self.branch_properties["length"][n]
-            self.branch_properties["length"][n] = \
-                [self.imgscale * length for length in lengths]
+        # Convert branch lengths physical units - only makes sense in 2D
+        if len(self.vskeleton)==0:
+            for n in range(self.number_of_filaments):
+                lengths = self.branch_properties["length"][n]
+                self.branch_properties["length"][n] = [
+                    self.imgscale * length for length in lengths]
 
         self.skeleton = \
             recombine_skeletons(self.filament_arrays["final"],
                                 self.array_offsets, self.image.shape,
                                 self.skeleton_pad_size)
+        # TODO if we want an updated vskeleton it needs to be regenerated
+        # here now that the skel has been pruned etc. 
 
         self.skeleton_longpath = \
             recombine_skeletons(self.filament_arrays["long path"],
@@ -993,7 +1067,7 @@ class fil_finder_2D(BaseInfoMixin):
 
     def find_widths(self, fit_model=gauss_model, try_nonparam=True,
                     use_longest_paths=False, verbose=False, save_png=False,
-                    **kwargs):
+                    cubefile=None, mom0width=None, **kwargs):
         '''
 
         The final step of the algorithm is to find the widths of each
@@ -1027,6 +1101,7 @@ class fil_finder_2D(BaseInfoMixin):
             Enables plotting.
         save_png : bool, optional
             Saves the plot made in verbose mode. Disabled by default.
+        cubefile allows a filtered mom0 between +/- mom0width
 
         Attributes
         ----------
@@ -1048,9 +1123,21 @@ class fil_finder_2D(BaseInfoMixin):
         else:
             skel_arrays = self.filament_arrays["final"]
 
-        dist_transform_all, dist_transform_separate = \
+        dist_transform_all, dist_transform_separate, dist_transform_indices= \
             dist_transform(skel_arrays,
                            self.skeleton)
+
+        # need also the vel of the closest skel pix
+        pkvel_arrays=[]
+#        for k in range(len(skel_arrays)):
+            #pkvel_array=np.zeros(((np.ndim(skel_arrays[k]),) + skel_arrays[k].shape),dtype=np.int32)
+            
+# XXXX TODO: CHECK OFFSET CALC FROM  SOMEWHERE ELSE IN  CODE
+#            xoff=self.array_offsets[k][0]+self.skeleton_pad_size
+#            yoff=self.array_offsets[k][0]+self.skeleton_pad_size
+#            pkvel_array=self.vskeleton[dist_transform_indices[k][0]+xoff,
+#                                       dist_transform_indices[k][0]+yoff]
+
 
         # Prepare the storage
         self.width_fits["Parameters"] = np.empty((self.number_of_filaments, 4))
@@ -1062,20 +1149,43 @@ class fil_finder_2D(BaseInfoMixin):
         self._rad_profiles = []
         self._unbin_rad_profiles = []
 
+        if cubefile==None or mom0width==None:
+            cubefile=""
+            mom0width=None
+        if os.path.exists(cubefile):
+            # making the graph?
+            from astropy.io import fits
+            cubedata=fits.getdata(cubefile)
+            cubedata[np.isnan(cubedata)]=0. # RI protect
+            scube=cubedata.shape
+            simg=self.image.shape
+            # casa 4d
+            if scube[0]==1:
+                scube=scube[1:]
+                cubedata=cubedata[0]
+            print "SCUBE:",simg,scube
+            if len(scube)!=3:
+                print "not a cube?!"
+                stop
+            if not (simg[-1]==scube[-1] and simg[-2]==scube[-2]):
+                print "cube and flat image not consistent"
+                stop
+
         for n in range(self.number_of_filaments):
 
             # Shift bottom offset by 1. There's a +1 running around somewhere
             # in the old code that isn't in the new code. Just make the
             # correction here.
             low_corner = list(self.array_offsets[n][0])
-            low_corner[0] -= 1
-            low_corner[1] -= 1
+# RI should this be minus skeleton_pad_size? change from "1" to that
+            low_corner[0] -= self.skeleton_pad_size
+            low_corner[1] -= self.skeleton_pad_size
             offsets = (tuple(low_corner), self.array_offsets[n][1])
 
             # Need the unbinned data for the non-parametric fit.
             out = radial_profile(self.image, dist_transform_all,
                                  dist_transform_separate[n],
-                                 offsets, self.imgscale,
+                                 offsets,self.imgscale,
                                  **kwargs)
 
             if out is not None:
@@ -1146,15 +1256,19 @@ class fil_finder_2D(BaseInfoMixin):
                 xhigh, yhigh = (self.array_offsets[n][1][0],
                                 self.array_offsets[n][1][1])
                 shape = (xhigh - xlow, yhigh - ylow)
+                # RI - not sure this is ness but adding it for now:
+                shape=skel_arrays[n].shape
 
+                # RI changed self.pad_size to self.skeleton_pad_size
                 p.contour(skel_arrays[n]
-                          [self.pad_size:shape[0] - self.pad_size,
-                           self.pad_size:shape[1] - self.pad_size], colors="r")
+                          [self.skeleton_pad_size:shape[0] - self.skeleton_pad_size,
+                           self.skeleton_pad_size:shape[1] - self.skeleton_pad_size], colors="r")
 
-                img_slice = self.image[xlow + self.pad_size:
-                                       xhigh - self.pad_size,
-                                       ylow + self.pad_size:
-                                       yhigh - self.pad_size]
+                # RI changed self.pad_size to self.skeleton_pad_size
+                img_slice = self.image[xlow  + self.skeleton_pad_size:
+                                       xhigh - self.skeleton_pad_size,
+                                       ylow  + self.skeleton_pad_size:
+                                       yhigh - self.skeleton_pad_size]
 
                 # Use an asinh stretch to highlight all features
                 from astropy.visualization import AsinhStretch
@@ -1165,6 +1279,7 @@ class fil_finder_2D(BaseInfoMixin):
                 p.imshow(img_slice, cmap='binary', origin='lower',
                          norm=ImageNormalize(vmin=vmin, vmax=vmax,
                                              stretch=AsinhStretch()))
+                p.xlabel("llc=%i,%i"%(xlow,ylow))
                 cbar = p.colorbar()
                 cbar.set_label(r'Intensity')
 

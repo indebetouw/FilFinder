@@ -1,5 +1,5 @@
 # Licensed under an MIT open source license - see LICENSE
-
+                            
 from .length import *
 from .utilities import distance
 
@@ -9,7 +9,7 @@ import matplotlib.pyplot as p
 import copy
 
 
-def isolateregions(binary_array, size_threshold=0, pad_size=0,
+def isolateregions(binary_array, size_threshold=0, pad_size=5,
                    fill_hole=False, rel_size=0.1, morph_smooth=False):
     '''
 
@@ -80,7 +80,10 @@ def isolateregions(binary_array, size_threshold=0, pad_size=0,
             eachfil = nd.binary_closing(eachfil, np.ones((3, 3)))
         output_arrays.append(eachfil)
         # Keep the coordinates from the original image
-        lower = (max(0, x.min() - pad_size), max(0, y.min() - pad_size))
+        if x.min()<pad_size or y.min()<pad_size:   # RI
+            print "negative x or y",x.min(),y.min(),pad_size  # RI
+#RI        lower = (max(0, x.min() - pad_size), max(0, y.min() - pad_size))
+        lower = (x.min() - pad_size, y.min() - pad_size)
         upper = (x.max() + pad_size + 1, y.max() + pad_size + 1)
         corners.append([lower, upper])
 
@@ -674,7 +677,7 @@ def make_final_skeletons(labelisofil, inters, verbose=False, save_png=False,
             p.imshow(cleaned_array, origin='lower', interpolation='nearest')
 
             if save_png:
-                p.savefig(save_name)
+                p.savefig(save_name+"/"+save_name+".final_skel."+str(n)+".png")
                 p.close()
             if verbose:
                 p.show()

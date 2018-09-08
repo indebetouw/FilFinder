@@ -68,6 +68,14 @@ def red_chisq(data, fit, nparam, sd):
     return stat
 
 
+def try_mkdir(name):
+    '''
+    Checks if a folder exists, and makes it if it doesn't
+    '''
+    import os
+    if not os.path.isdir(os.path.join(os.getcwd(), name)):
+        os.mkdir(os.path.join(os.getcwd(), name))
+
 def in_ipynb():
     try:
         cfg = get_ipython().config

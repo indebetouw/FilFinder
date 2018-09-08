@@ -32,7 +32,7 @@ check3 = np.array([[1, 1, 0],
                    [0, 0, 1]])
 
 
-def skeleton_length(skeleton):
+def skeleton_length(skeleton,vskeleton=[]):
     '''
     Length finding via morphological operators. We use the differences in
     connectivity between 4 and 8-connected to split regions. Connections
@@ -46,11 +46,15 @@ def skeleton_length(skeleton):
     ----------
     skeleton : numpy.ndarray
         Array containing the skeleton.
+    vskeleton : optional array to calculate lengths in 3D 
 
     Returns
     -------
     length : float
         Length of the skeleton.
+    length_2d : if vskeleton is nonzero, then length will be in 3D, 
+         but I return what it would have been in 2D, for potential diagnostic
+         purposes
 
     '''
 
@@ -64,8 +68,26 @@ def skeleton_length(skeleton):
     four_length = np.sum(
         four_sizes[four_sizes > 1]) - len(four_sizes[four_sizes > 1])
 
+    # 3D: figure out the delta-v within each four_connected region and 
+    # add that in quadrature to its internal length (the quantity above)
+    # to find proper delta-v we need to actually follow the skel which 
+    # is expensive, but a decent lower limit would be the minmax vel over 
+    # the range
+    if len(vskeleton)>0:        
+        four_length_2d=four_length # save 2d part
+        four_length=0
+        fourz=np.where(four_sizes>1)[0]
+        for ifour in fourz:
+            z=np.where(four_labels==ifour)
+            velvalues=vskeleton[z[0],z[1]]
+            if velvalues.min()<0: 
+                print "ERROR",four_labels
+                import pdb
+                pdb.set_trace()
+            velrange=velvalues.max()-velvalues.min()
+            four_length=four_length+np.sqrt( (four_sizes[ifour]-1)**2 + velrange**2 )
+    
     # Find pixels which a 4-connected and subtract them off the skeleton
-
     four_objects = np.where(four_sizes > 1)[0]
 
     skel_copy = copy.copy(skeleton)
@@ -80,26 +102,90 @@ def skeleton_length(skeleton):
     eight_sizes = nd.sum(
         skel_copy, eight_labels, range(np.max(eight_labels) + 1))
 
+    # sum of lengths minus number of segments = sum of (lengths-1)
     eight_length = (
         np.sum(eight_sizes) - np.max(eight_labels)) * np.sqrt(2)
+
+    # 3D: we need to again estimate the delta-v within each region to add
+    # to the length.  
+    if len(vskeleton)>0:
+        eight_length_2d=eight_length # save 2D part
+        eightz=np.where(eight_sizes>1)[0]
+        eight_length=0
+        for ieight in eightz:
+            z=np.where(eight_labels==ieight)
+            velvalues=vskeleton[z]
+            if velvalues.min()<0: 
+                print "ERROR",eight_labels
+                import pdb
+                pdb.set_trace()
+            velrange=velvalues.max()-velvalues.min()
+            eight_length=eight_length+np.sqrt( 2*(eight_sizes[ieight]-1)**2 + velrange**2 )
+
 
     # If there are no 4-connected pixels, we don't need the hit-miss portion.
     if four_length == 0.0:
         conn_length = 0.0
+        conn_length_2d = 0.0
 
     else:
+        # these are the connections between 4-connected and 8-connected
+        # regions
 
         store = np.zeros(skeleton.shape)
+        # these are the additional delta-vel between 4-conn and 8-conn
+        if len(vskeleton)>0:
+            dv = np.zeros(skeleton.shape)
 
         # Loop through the 4 rotations of the structuring elements
         for k in range(0, 4):
             hm1 = nd.binary_hit_or_miss(
                 skeleton, structure1=np.rot90(struct1, k=k))
             store += hm1
+            if len(vskeleton)>0:
+                z=np.where(hm1)
+                for zi in range(len(z[0])):
+                    if k==0:
+                        dv[z[0][zi],z[1][zi]]=np.absolute(
+                            vskeleton[z[0][zi],z[1][zi]]-
+                            vskeleton[z[0][zi]-1,z[1][zi]-1])
+                    elif k==1:
+                        dv[z[0][zi],z[1][zi]]=np.absolute(
+                            vskeleton[z[0][zi],z[1][zi]]-
+                            vskeleton[z[0][zi]+1,z[1][zi]-1])
+                    elif k==2:
+                        dv[z[0][zi],z[1][zi]]=np.absolute(
+                            vskeleton[z[0][zi],z[1][zi]]-
+                            vskeleton[z[0][zi]+1,z[1][zi]+1])
+                    else:
+                        dv[z[0][zi],z[1][zi]]=np.absolute(
+                            vskeleton[z[0][zi],z[1][zi]]-
+                            vskeleton[z[0][zi]-1,z[1][zi]+1])
 
             hm2 = nd.binary_hit_or_miss(
                 skeleton, structure1=np.rot90(struct2, k=k))
             store += hm2
+            if len(vskeleton)>0:
+                z=np.where(hm2)
+                for zi in range(len(z[0])):
+                    if k==0:
+                        dv[z[0][zi],z[1][zi]]=np.absolute(
+                            vskeleton[z[0][zi],z[1][zi]]-
+                            vskeleton[z[0][zi]-1,z[1][zi]+1])
+                    elif k==1:
+                        dv[z[0][zi],z[1][zi]]=np.absolute(
+                            vskeleton[z[0][zi],z[1][zi]]-
+                            vskeleton[z[0][zi]-1,z[1][zi]-1])
+                    elif k==2:
+                        dv[z[0][zi],z[1][zi]]=np.absolute(
+                            vskeleton[z[0][zi],z[1][zi]]-
+                            vskeleton[z[0][zi]+1,z[1][zi]-1])
+                    else:
+                        dv[z[0][zi],z[1][zi]]=np.absolute(
+                            vskeleton[z[0][zi],z[1][zi]]-
+                            vskeleton[z[0][zi]+1,z[1][zi]+1])
+
+            # the dv may get written twice but it should be the same dv
 
             hm_check3 = nd.binary_hit_or_miss(
                 skeleton, structure1=np.rot90(check3, k=k))
@@ -117,14 +203,30 @@ def skeleton_length(skeleton):
         conn_length = np.sqrt(2) * \
             np.sum(np.sum(store, axis=1), axis=0)  # hits
 
-    return conn_length + eight_length + four_length
+        if len(vskeleton)>0:
+            conn_length_2d = conn_length # save 2D part
+            z=np.where(dv>0)
+            conn_length = conn_length - np.sqrt(2)*len(z[0]) + \
+                np.sum(np.sqrt(dv[z]**2 + 2))
+
+    if len(vskeleton)>0:
+        leng=conn_length + eight_length + four_length
+        leng2d=conn_length_2d + eight_length_2d + four_length_2d
+        if (((leng-leng2d)/leng2d) < -1e-4): # or (((leng-leng2d)/leng2d) >2):
+            print "error: leng 2d>3d : ",leng2d,leng3d
+            import pdb
+            pdb.set_trace()
+        return leng,leng2d
+            
+    else:
+        return conn_length + eight_length + four_length
 
 ########################################################
 # Composite Functions
 ########################################################
 
 
-def init_lengths(labelisofil, filbranches, array_offsets, img):
+def init_lengths(labelisofil, filbranches, array_offsets, img, skel_pad_size=0, vskel=[]):
     '''
 
     This is a wrapper on fil_length for running on the branches of the
@@ -142,37 +244,76 @@ def init_lengths(labelisofil, filbranches, array_offsets, img):
         original image.
     img : numpy.ndarray
         Original image.
+    vskel : optional v array - if set, lengths will be in 3D 
 
     Returns
     -------
     branch_properties: dict
         Contains the lengths and intensities of the branches.
         Keys are *length* and *intensity*.
+        if *length* is 3D, there will also be length_2d in the dict.
+
+        so far, av_intensity remains 2D because the use case has been 
+        to use the peak intensity map as the 2D image, so av_intensity
+        is then the same in 2D and 3D.
 
     '''
     num = len(labelisofil)
 
     # Initialize Lists
     lengths = []
+    if len(vskel)>0:
+        lengths_2d = []
     av_branch_intensity = []
     all_branch_pts = []
 
     for n in range(num):
         leng = []
+        if len(vskel)>0:
+            leng_2d = []
         av_intensity = []
         branch_pix = []
 
         label_copy = copy.copy(labelisofil[n])
+        # this requires fix to allow pix_ident::isolateregions to 
+        # return negative llc:
+        # then offsets can be <0, but not less than -skel_pad_size
+        x0=array_offsets[n][0][0] 
+        y0=array_offsets[n][0][1]
+
+        if len(vskel)>0:
+            s=label_copy.shape
+            vskel_copy = np.zeros(s)
+            x, y = np.where(label_copy>0) # these have the pad included
+            vskel_copy[x,y] = vskel[x + x0, y + y0]
+
         objects = nd.find_objects(label_copy)
         for i, obj in enumerate(objects):
             # Scale the branch array to the branch size
             branch_array = np.zeros_like(label_copy[obj])
+            if len(vskel)>0:
+                branch_vskel = vskel_copy[obj]
 
             # Find the skeleton points and set those to 1
             branch_pts = np.where(label_copy[obj] == i + 1)
             branch_array[branch_pts] = 1
 
             # Now find the length on the branch
+            if len(vskel)>0:
+                branch_length, branch_length_2d = skeleton_length(branch_array,branch_vskel)
+                # for debugging:
+                # print "init_len 3d: ",branch_length_2d," > ",branch_length
+
+                if branch_length_2d == 0.0:
+                    # For use in longest path algorithm, will be set to zero for
+                    # final analysis
+                    branch_length_2d = 0.5
+                
+                leng_2d.append(branch_length_2d)
+
+            else:
+                branch_length = skeleton_length(branch_array)
+
             if branch_array.sum() == 1:
                 # Single pixel. No need to find length
                 # For use in longest path algorithm, will be set to zero for
@@ -198,10 +339,18 @@ def init_lengths(labelisofil, filbranches, array_offsets, img):
         lengths.append(leng)
         av_branch_intensity.append(av_intensity)
         all_branch_pts.append(branch_pix)
-
-        branch_properties = {"length": lengths,
-                             "intensity": av_branch_intensity,
-                             "pixels": all_branch_pts}
+        if len(vskel)>0:
+            lengths_2d.append(leng_2d)
+            
+    if len(vskel)>0:
+        branch_properties = {
+            "length": lengths, "intensity": av_branch_intensity, 
+            "pixels": all_branch_pts, 
+            "length_2d": lengths_2d}
+    else:
+        branch_properties = {
+            "length": lengths, "intensity": av_branch_intensity,
+            "pixels": all_branch_pts}
 
     return branch_properties
 
@@ -270,19 +419,31 @@ def pre_graph(labelisofil, branch_properties, interpts, ends):
             w * (intensity[idx] / np.sum(intensity))
 
     lengths = branch_properties["length"]
+    if branch_properties.has_key("length_2d"):
+        lengths_2d=branch_properties["length_2d"]
     branch_intensity = branch_properties["intensity"]
 
     for n in range(num):
         inter_nodes_temp = []
         # Create end_nodes, which contains lengths, and nodes, which we will
         # later add in the intersections
-        end_nodes.append([(labelisofil[n][i[0], i[1]],
-                           path_weighting(int(labelisofil[n][i[0], i[1]] - 1),
-                                          lengths[n],
-                                          branch_intensity[n]),
-                           lengths[n][int(labelisofil[n][i[0], i[1]] - 1)],
-                           branch_intensity[n][int(labelisofil[n][i[0], i[1]] - 1)])
-                          for i in ends[n]])
+        if branch_properties.has_key("length_2d"):
+            end_nodes.append([(labelisofil[n][i[0], i[1]],
+                               path_weighting(int(labelisofil[n][i[0], i[1]] - 1),
+                                              lengths[n],
+                                              branch_intensity[n]),
+                               lengths[n][int(labelisofil[n][i[0], i[1]] - 1)],
+                               branch_intensity[n][int(labelisofil[n][i[0], i[1]] - 1)],
+                               lengths_2d[n][int(labelisofil[n][i[0], i[1]] - 1)])
+                              for i in ends[n]])
+        else:
+            end_nodes.append([(labelisofil[n][i[0], i[1]],
+                               path_weighting(int(labelisofil[n][i[0], i[1]] - 1),
+                                              lengths[n],
+                                              branch_intensity[n]),
+                               lengths[n][int(labelisofil[n][i[0], i[1]] - 1)],
+                               branch_intensity[n][int(labelisofil[n][i[0], i[1]] - 1)])
+                              for i in ends[n]])
         nodes.append([labelisofil[n][i[0], i[1]] for i in ends[n]])
 
     # Intersection nodes are given by the intersections points of the filament.
@@ -302,11 +463,19 @@ def pre_graph(labelisofil, branch_properties, interpts, ends):
                                      labelisofil[n][i[0], i[1] - 1],
                                      labelisofil[n][i[0] + 1, i[1] - 1]]]).astype(int)
                 for x in np.unique(int_arr[np.nonzero(int_arr)]):
-                    uniqs.append((x,
-                                  path_weighting(x - 1, lengths[n],
-                                                 branch_intensity[n]),
-                                  lengths[n][x - 1],
-                                  branch_intensity[n][x - 1]))
+                    if branch_properties.has_key("length_2d"):
+                        uniqs.append((x,
+                                      path_weighting(x - 1, lengths[n],
+                                                     branch_intensity[n]),
+                                      lengths[n][x - 1],
+                                      branch_intensity[n][x - 1],
+                                      lengths_2d[n][x - 1]))
+                    else:
+                        uniqs.append((x,
+                                      path_weighting(x - 1, lengths[n],
+                                                     branch_intensity[n]),
+                                      lengths[n][x - 1],
+                                      branch_intensity[n][x - 1]))
             # Intersections with multiple pixels can give the same branches.
             # Get rid of duplicates
             uniqs = list(set(uniqs))
@@ -410,6 +579,7 @@ def longest_path(edge_list, nodes, verbose=False,
     extremum = []
     graphs = []
 
+    import os
     for n in range(num):
         G = nx.Graph()
         G.add_nodes_from(nodes[n])
@@ -460,7 +630,7 @@ def longest_path(edge_list, nodes, verbose=False,
                 p.axis('off')
 
                 if save_png:
-                    p.savefig(save_name)
+                    p.savefig(os.path.join(save_name,save_name+(".longest_path.%i.png"%n)))
                     p.close()
                 if verbose:
                     p.show()
@@ -621,7 +791,8 @@ def prune_graph(G, nodes, edge_list, max_path, labelisofil, branch_properties,
 
 
 def main_length(max_path, edge_list, labelisofil, interpts, branch_lengths,
-                img_scale, verbose=False, save_png=False, save_name=None):
+                img_scale, verbose=False, save_png=False, save_name=None,
+                vskel=[],array_offsets=[]):
     '''
     Wraps previous functionality together for all of the skeletons in the
     image. To find the overall length for each skeleton, intersections are
@@ -662,9 +833,15 @@ def main_length(max_path, edge_list, labelisofil, interpts, branch_lengths,
     main_lengths = []
     longpath_arrays = []
 
-    for num, (path, edges, inters, skel_arr, lengths) in \
+    # but if there is no cube then the enumerate needs an array
+    if len(array_offsets)==0:
+        array_offsets=[]
+        for n in range(len(labelisofil)):
+            array_offsets.append([(0,0),(1e6,1e6)])
+
+    for num, (path, edges, inters, skel_arr, lengths, offsets) in \
         enumerate(zip(max_path, edge_list, interpts, labelisofil,
-                      branch_lengths)):
+                      branch_lengths, array_offsets)):
 
         if len(path) == 1:
             main_lengths.append(lengths[0] * img_scale)
@@ -714,7 +891,18 @@ def main_length(max_path, edge_list, labelisofil, interpts, branch_lengths,
                     break
                 count = 0
 
-            main_lengths.append(skeleton_length(skeleton) * img_scale)
+            if len(vskel)>0:
+                x0=offsets[0][0] 
+                y0=offsets[0][1]
+                s=skeleton.shape
+                vskel_arr = np.zeros(s)
+                x, y = np.where(skeleton>0) # these have the pad included
+                vskel_arr[x,y] = vskel[x + x0, y + y0]
+                sklen,sklen_2d=skeleton_length(skeleton, vskel_arr)
+                main_lengths.append(sklen * img_scale)
+            # XXX TODO main_lengths_2d ?
+            else:
+                main_lengths.append(skeleton_length(skeleton) * img_scale)
 
         longpath_arrays.append(skeleton.astype(int))
 
@@ -733,7 +921,7 @@ def main_length(max_path, edge_list, labelisofil, interpts, branch_lengths,
                      interpolation="nearest")
 
             if save_png:
-                p.savefig(save_name)
+                p.savefig(save_name+"/"+save_name+".main_length."+str(num)+".png")
                 p.close()
             if verbose:
                 p.show()

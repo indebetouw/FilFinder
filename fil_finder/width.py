@@ -39,18 +39,21 @@ def dist_transform(labelisofil, filclean_all):
     '''
 
     dist_transform_sep = []
+    dist_transform_indices = []  # add index of closest point on skel
 
     for skel_arr in labelisofil:
         if np.max(skel_arr) > 1:
             skel_arr[np.where(skel_arr > 1)] = 1
+        indices = np.zeros(((np.ndim(skel_arr),) + skel_arr.shape), dtype=np.int32)
         dist_transform_sep.append(
-            nd.distance_transform_edt(np.logical_not(skel_arr)))
+            nd.distance_transform_edt(np.logical_not(skel_arr),return_indices=True,indices=indices))
+        dist_transform_indices.append(indices)
 
     # Distance Transform of all cleaned filaments
     dist_transform_all = nd.distance_transform_edt(
         np.logical_not(filclean_all))
 
-    return dist_transform_all, dist_transform_sep
+    return dist_transform_all, dist_transform_sep, dist_transform_indices
 
 
 def gaussian_model(dist, radprof, with_bkg=True):
@@ -428,26 +431,30 @@ def radial_profile(img, dist_transform_all, dist_transform_sep, offsets,
 
     valids = np.zeros_like(dist_transform_sep, dtype=bool)
 
-    for i in range(len(x)):
-        # Check overall distance transform to make sure pixel belongs to proper
-        # filament
-        img_val = img_vals[x_full[i], y_full[i]]
-        sep_dist = dist_transform_sep[x[i], y[i]]
-        if check_global:
-            glob_dist = dist_transform_all[x_full[i], y_full[i]]
-        if np.isfinite(img_val):
+    try:
+        for i in range(len(x)):
+            # Check overall distance transform to make sure pixel belongs to proper
+            # filament
+            img_val = img_vals[x_full[i], y_full[i]]
+            sep_dist = dist_transform_sep[x[i], y[i]]
             if check_global:
-                # Include the point if it falls within the pad distance.
-                if sep_dist <= glob_dist + pad_pixel_distance:
+                glob_dist = dist_transform_all[x_full[i], y_full[i]]
+            if np.isfinite(img_val):
+                if check_global:
+                    # Include the point if it falls within the pad distance.
+                    if sep_dist <= glob_dist + pad_pixel_distance:
+                        width_value.append(img_val)
+                        width_distance.append(sep_dist)
+                        # valids[x_full[i], y_full[i]] = True
+                        valids[x[i], y[i]] = True
+                else:
                     width_value.append(img_val)
                     width_distance.append(sep_dist)
                     # valids[x_full[i], y_full[i]] = True
                     valids[x[i], y[i]] = True
-            else:
-                width_value.append(img_val)
-                width_distance.append(sep_dist)
-                # valids[x_full[i], y_full[i]] = True
-                valids[x[i], y[i]] = True
+    except:
+        import pdb
+        pdb.set_trace()
 
     if debug_mode:
         import matplotlib.pyplot as plt
