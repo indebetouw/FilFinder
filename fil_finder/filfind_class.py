@@ -594,7 +594,7 @@ class fil_finder_2D(BaseInfoMixin):
                 try_mkdir(self.save_name)
                 p.savefig(os.path.join(self.save_name, self.save_name + "_mask.png"))
             if verbose:
-                p.show()
+                p.show(block=False)
             if in_ipynb():
                 p.clf()
 
@@ -650,14 +650,14 @@ class fil_finder_2D(BaseInfoMixin):
                 p.savefig(os.path.join(self.save_name,
                                        self.save_name + "_initial_skeletons.png"))
             if verbose:
-                p.show()
+                p.show(block=False)
             if in_ipynb():
                 p.clf()
 
     def analyze_skeletons(self, prune_criteria='all', relintens_thresh=0.2,
                           nbeam_lengths=5, branch_nbeam_lengths=3,
                           skel_thresh=None, branch_thresh=None,
-                          verbose=False, save_png=False, cubefile=None):
+                          verbose=False, save_png=False, cubefile=None, max_iter=None):
         '''
 
         This function wraps most of the skeleton analysis. Several steps are
@@ -671,7 +671,7 @@ class fil_finder_2D(BaseInfoMixin):
             body, end, or intersection point. See the documentation on find_filpix
             for a complete explanation. The function labels the branches and
             intersections of each skeletons.
-        *   init_lengths finds the length of each branch in each skeleton and
+        *   init_lengths finds the length [pix] of each branch in each skeleton and
             also returns the coordinates of each of these branches for use in
             the graph representation.
         *   pre_graph turns the skeleton structures into a graphing format
@@ -762,7 +762,7 @@ class fil_finder_2D(BaseInfoMixin):
         elif skel_thresh is not None:
             self.skel_thresh = skel_thresh
 
-        # Set the minimum branch length to be the beam size.
+        # Set the minimum branch length to be the beam size. (sigma, not FWHM)
         if self.branch_thresh is None:
             self.branch_thresh = \
                 round(branch_nbeam_lengths * self.beamwidth / self.imgscale)
@@ -834,6 +834,27 @@ class fil_finder_2D(BaseInfoMixin):
         edge_list, nodes, loop_edges = pre_graph(
             labeled_fil_arrays, self.branch_properties, interpts, ends)
 
+        import pdb
+        pdb.set_trace()
+        
+        # remove chaff completely:
+        lengths=self.branch_properties['length']
+        for n in range(len(lengths))[::-1]:
+            if np.max(lengths[n])<self.branch_thresh:
+                del edge_list[n]
+                for k in self.branch_properties.keys():
+                    del self.branch_properties[k][n]
+                del nodes[n]
+                del loop_edges[n]
+                del labeled_fil_arrays[n]
+                del hubs[n]
+                del ends[n]
+                del filbranches[n]
+                del isolated_filaments[n]
+                del offsets[n]
+
+        pdb.set_trace()
+
         max_path, extremum, G = \
             longest_path(edge_list, nodes,
                          verbose=verbose,
@@ -842,16 +863,18 @@ class fil_finder_2D(BaseInfoMixin):
                          skeleton_arrays=labeled_fil_arrays)
 
         # TODO make length::prune_graph prune length_2d - may have to add that
-        # to edges to get it to work 
+        # to edges to get it to work
+        # TODO prune doesn't update edge_list during *merge* section
         updated_lists = \
             prune_graph(G, nodes, edge_list, max_path, labeled_fil_arrays,
                         self.branch_properties, loop_edges,
                         length_thresh=self.branch_thresh,
                         relintens_thresh=relintens_thresh,
-                        prune_criteria=prune_criteria)
+                        prune_criteria=prune_criteria,max_iter=max_iter)
 
         labeled_fil_arrays, edge_list, nodes, self.branch_properties = \
             updated_lists
+        self.edge_list=edge_list
 
         # TODO this probably needs 3d modification but is it used for anything?
         self.filament_extents = extremum_pts(labeled_fil_arrays,
@@ -876,6 +899,9 @@ class fil_finder_2D(BaseInfoMixin):
 
         self.labelled_filament_arrays = labeled_fil_arrays
 
+        # now labeled_fil_arrays are inconsistent with filament_arrays['final']
+        # since some branches may have been pruned
+        
         # Convert branch lengths physical units - only makes sense in 2D
         if len(self.vskeleton)==0:
             for n in range(self.number_of_filaments):
@@ -1061,7 +1087,7 @@ class fil_finder_2D(BaseInfoMixin):
                         p.savefig(os.path.join(self.save_name,
                                                self.save_name + "_rht_" + str(n) + ".png"))
                     if verbose:
-                        p.show()
+                        p.show(block=False)
                     if in_ipynb():
                         p.clf()
 
@@ -1289,7 +1315,7 @@ class fil_finder_2D(BaseInfoMixin):
                         "{0}_width_fit_{1}.png".format(self.save_name, n)
                     p.savefig(os.path.join(self.save_name, filename))
                 if verbose:
-                    p.show()
+                    p.show(block=False)
                 if in_ipynb():
                     p.clf()
 

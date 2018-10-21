@@ -51,7 +51,7 @@ def skeleton_length(skeleton,vskeleton=[]):
     Returns
     -------
     length : float
-        Length of the skeleton.
+        Length of the skeleton.  [pixels]
     length_2d : if vskeleton is nonzero, then length will be in 3D, 
          but I return what it would have been in 2D, for potential diagnostic
          purposes
@@ -407,10 +407,8 @@ def pre_graph(labelisofil, branch_properties, interpts, ends):
 
     def path_weighting(idx, length, intensity, w=0.5):
         '''
-
         Relative weighting for the shortest path algorithm using the branch
         lengths and the average intensity along the branch.
-
         '''
         if w > 1.0 or w < 0.0:
             raise ValueError(
@@ -689,6 +687,21 @@ def prune_graph(G, nodes, edge_list, max_path, labelisofil, branch_properties,
         Updated from input.
     '''
 
+    debug=True
+    from copy import copy
+
+    def path_weighting(idx, length, intensity, w=0.5):
+        '''
+        Relative weighting for the shortest path algorithm using the branch
+        lengths and the average intensity along the branch.
+        '''
+        if w > 1.0 or w < 0.0:
+            raise ValueError(
+                "Relative weighting w must be between 0.0 and 1.0.")
+        return (1 - w) * (length[idx] / np.sum(length)) + \
+            w * (intensity[idx] / np.sum(intensity))
+
+    
     num = len(labelisofil)
 
     if prune_criteria not in ['all', 'length', 'intensity']:
@@ -700,6 +713,11 @@ def prune_graph(G, nodes, edge_list, max_path, labelisofil, branch_properties,
         iterat = 0
         while True:
             degree = dict(G[n].degree())
+#            p.subplot(2,2,iterat+1)
+#            nx.draw_networkx(G[n],node_size=100)
+#            p.axis('off')
+#            import pdb
+#            pdb.set_trace()
 
             # Look for unconnected nodes and remove from the graph
             unconn = [key for key in degree.keys() if degree[key] == 0]
@@ -709,6 +727,11 @@ def prune_graph(G, nodes, edge_list, max_path, labelisofil, branch_properties,
 
             single_connect = [key for key in degree.keys() if degree[key] == 1]
 
+            # nodes and max_path are outdated if iter>0, but if we assume
+            # that the original max_path is still the thing worth preserving,
+            # i.e. the toplogy hasn't been drastically altered, and
+            # if single_connect is up-to-date which I think it is, then
+            # delete_candidate should be ok
             delete_candidate = list((set(nodes[n]) - set(max_path[n])) &
                                     set(single_connect))
 
@@ -751,25 +774,39 @@ def prune_graph(G, nodes, edge_list, max_path, labelisofil, branch_properties,
                     edge_pts = np.where(labelisofil[n] == edge[2][0])
                     assert len(edge_pts[0]) == len(branch_properties['pixels'][n][idx-1])
                     labelisofil[n][edge_pts] = 0
+                    # RI: need to also "pop"/relabel that idx from labelisofil below
                     try:
+                        if debug:
+                            print "removing edge ",edge
                         edge_list[n].remove(edge)
                         nodes[n].remove(edge[1])
                         G[n].remove_edge(edge[0], edge[1])
                     except ValueError:
+                        if debug:
+                            print " > failed; removing from loop_edges instead"
                         loop_edges[n].remove(edge)
                     branch_properties["number"][n] -= 1
                     del_idx.append(idx)
 
+            if debug: print "edge_list after prune: len=",len(edge_list[n])," and in G:",len(G[n].edges())
+
             if len(del_idx) > 0:
                 del_idx.sort()
                 for idx in del_idx[::-1]:
+                    imax=len(branch_properties['pixels'][n])
                     branch_properties['pixels'][n].pop(idx - 1)
                     branch_properties['length'][n].pop(idx - 1)
                     branch_properties['intensity'][n].pop(idx - 1)
+                    for ii in np.arange(imax-idx)+idx:
+                        z=np.where(labelisofil[n]==(ii+1))
+                        if len(z[0])>0:
+                            labelisofil[n][z[0],z[1]]=ii
 
             # Now check to see if we need to merge any nodes in the graph
             # after deletion. These will be intersection nodes with 2
             # connections
+            new_edge_list=copy(edge_list[n])
+
             while True:
                 degree = dict(G[n].degree())
                 doub_connect = [key for key in degree.keys()
@@ -779,12 +816,26 @@ def prune_graph(G, nodes, edge_list, max_path, labelisofil, branch_properties,
                     break
 
                 for node in doub_connect:
+                    if debug: print "merging node ",node
+                    # TODO remove that node from the edge_list above, or
+                    # just recalculate the edge_list after node merging -
+                    # before, we used pre_graph to do that.
+                    # networkx keeps track after merge_nodes,
+                    # but how to merge the properties?
+                    # edge_list: ('A',1,(path_weighting(x,lengths,branch_intensity),lengths,branch_intensity,lengths_2d))
                     G[n] = merge_nodes(node, G[n])
+#                    zfirst=p.where(node==[edge[1] for edge in edge_list[n]])[0]
+#                    zsecond=p.where(node==[edge[0] for edge in edge_list[n]])[0]
+#                    new_edge_list
+
+            if debug:
+                print "edge_list after merge: len=",len(edge_list[n])," and in G:",len(G[n].edges())
+                print G[n].edges()
 
             iterat += 1
 
             if iterat == max_iter:
-                # warnings.warn("Graph pruning reached max iterations.")
+                Warning("Graph pruning reached max iterations.")
                 break
 
     return labelisofil, edge_list, nodes, branch_properties
