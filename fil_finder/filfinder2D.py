@@ -236,7 +236,7 @@ class FilFinder2D(BaseInfoMixin):
             If None, the patch size is set to ~0.05 pc. This ensures the large
             scale structure is not affected while smoothing extraneous pixels off
             the edges.
-        size_thresh : int, optional
+        size_thresh : int quantity, optional
             This sets the lower threshold on the size of objects found in the
             adaptive thresholding. If None, the value is set at
             :math:`5\pi (0.1 \text(pc))^2` which is the area of the minimum dimensions
@@ -630,7 +630,7 @@ class FilFinder2D(BaseInfoMixin):
         for n, fil in enumerate(self.filaments):
             savename = "{0}_{1}".format(save_name, n)
             if verbose:
-                print("Filament: %s / %s" % (n + 1, self.number_of_filaments))
+                print("Filament: %s / %s" % (n + 1, len(self.filaments)))
 
             fil.skeleton_analysis(self.image, verbose=verbose,
                                   save_png=save_png,
