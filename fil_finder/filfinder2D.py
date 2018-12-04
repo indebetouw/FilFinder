@@ -149,6 +149,14 @@ class FilFinder2D(BaseInfoMixin):
             mask[np.isnan(mask)] = 0.0
             self.mask = mask
 
+    def set_image(self,hdu):
+        '''
+        change the image data array (assumes same image size and WCS e.g. mom8>mom0)
+        '''
+        output = input_data(hdu)
+        self._image = output["data"]
+        
+
     def preprocess_image(self, skip_flatten=False, flatten_percent=None):
         '''
         Preprocess and flatten the image before running the masking routine.
@@ -735,7 +743,8 @@ class FilFinder2D(BaseInfoMixin):
     def exec_rht(self, radius=10 * u.pix,
                  ntheta=180, background_percentile=25,
                  branches=False, min_branch_length=3 * u.pix,
-                 verbose=False, save_png=False, save_name=None):
+                 verbose=False, save_png=False, save_name=None,
+                 gradimage=None):
         '''
 
         Implements the Rolling Hough Transform (Clark et al., 2014).
@@ -774,6 +783,7 @@ class FilFinder2D(BaseInfoMixin):
             Saves the plot made in verbose mode. Disabled by default.
         save_name : str, optional
             Prefix for the saved plots.
+        gradimage : 2D array to pass to rht for gradient calulation
 
         Attributes
         ----------
@@ -804,11 +814,13 @@ class FilFinder2D(BaseInfoMixin):
                 fil.rht_branch_analysis(radius=radius,
                                         ntheta=ntheta,
                                         background_percentile=background_percentile,
-                                        min_branch_length=min_branch_length)
+                                        min_branch_length=min_branch_length,
+                                        gradimage=gradimage)
 
             else:
                 fil.rht_analysis(radius=radius, ntheta=ntheta,
-                                 background_percentile=background_percentile)
+                                 background_percentile=background_percentile,
+                                 gradimage=gradimage)
 
                 if verbose:
                     if save_png:
@@ -953,7 +965,10 @@ class FilFinder2D(BaseInfoMixin):
                     save_name = "{0}_{1}_radprof.png".format(self.save_name, n)
                 else:
                     save_name = None
-                fil.plot_radial_profile(save_name=save_name, xunit=xunit)
+                # failed fits don't set the units on stddev which breaks evaluating
+                # the model to make the plot, so
+                if isinstance(fil._radprof_model.stddev_0.value, u.Quantity):
+                    fil.plot_radial_profile(save_name=save_name, xunit=xunit)
 
     def widths(self, unit=u.pix):
         '''

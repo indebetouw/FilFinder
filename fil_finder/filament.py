@@ -127,7 +127,7 @@ class Filament2D(FilamentNDBase):
 
         return out_arr
 
-    def skeleton(self, pad_size=0, corner_pix=None, out_type='all'):
+    def skeleton(self, pad_size=0, corner_pix=None, out_type='all', branchid=0):
         '''
         Create a mask from the pixel coordinates.
 
@@ -138,9 +138,10 @@ class Filament2D(FilamentNDBase):
         corner_pix : tuple of ints, optional
             The position of the left-bottom corner of the pixels in the
             skeleton. Used for offsetting the location of the pixels.
-        out_type : {"all", "longpath"}, optional
+        out_type : {"all", "longpath", "branch"}, optional
             Return the entire skeleton or just the longest path. Default is to
-            return the whole skeleton.
+            return the whole skeleton.  if branch, return just branchid
+        branchid : only used for out_type "branch"
 
         Returns
         -------
@@ -156,9 +157,9 @@ class Filament2D(FilamentNDBase):
             # Place the smallest pixel in the set at the pad size
             corner_pix = [pad_size, pad_size]
 
-        out_types = ['all', 'longpath']
+        out_types = ['all', 'longpath', 'branch']
         if out_type not in out_types:
-            raise ValueError("out_type must be 'all' or 'longpath'.")
+            raise ValueError("out_type must be 'all' or 'longpath' or 'branch'.")
 
         y_shape = self.pixel_extents[1][0] - self.pixel_extents[0][0] + \
             2 * pad_size + 1
@@ -169,6 +170,11 @@ class Filament2D(FilamentNDBase):
 
         if out_type == 'all':
             pixels = self.pixel_coords
+        elif out_type == 'branch':
+            ix=self.pixel_coords[0]-self.pixel_extents[0][0]
+            iy=self.pixel_coords[1]-self.pixel_extents[0][1]
+            z = np.where(self._labeled_mask[ix,iy]==branchid)[0]
+            pixels=(self.pixel_coords[0][z],self.pixel_coords[1][z])
         else:
             if not hasattr(self, '_longpath_pixel_coords'):
                 raise AttributeError("longest path is not defined. Run "
@@ -347,9 +353,12 @@ class Filament2D(FilamentNDBase):
                                  save_name="{0}_finalskeleton.png".format(save_name))
 
         # Track the final intersection and end points
-        interpts, hubs, ends =  \
-            pix_identify([final_fil_arrays[0].copy()], 1)[:3]
+        interpts, hubs, ends, filbranches, labeled_mask =  \
+            pix_identify([final_fil_arrays[0].copy()], 1)
 
+        skelpad=1 # not sure if this is possible to be <>1 in the new FilFinder2D
+        self._labeled_mask=labeled_mask[0][skelpad:-skelpad,skelpad:-skelpad]
+            
         # Adjust intersection and end points to be in the original array
         # positions
         corr_inters = []
@@ -468,7 +477,8 @@ class Filament2D(FilamentNDBase):
         # Add in the ipynb checker
 
     def rht_analysis(self, radius=10 * u.pix, ntheta=180,
-                     background_percentile=25):
+                     background_percentile=25,
+                     gradimage=None):
         '''
         Use the RHT to find the filament orientation and dispersion of the
         longest path.
@@ -496,7 +506,8 @@ class Filament2D(FilamentNDBase):
         longpath_arr = np.fliplr(longpath_arr)
 
         theta, R, quant = rht(longpath_arr, radius, ntheta,
-                              background_percentile)
+                              background_percentile,
+                              gradimage=gradimage[mask])
 
         twofive, mean, sevenfive = quant
 
@@ -576,7 +587,8 @@ class Filament2D(FilamentNDBase):
 
     def rht_branch_analysis(self, radius=10 * u.pix, ntheta=180,
                             background_percentile=25,
-                            min_branch_length=3 * u.pix):
+                            min_branch_length=3 * u.pix,
+                            gradimage=None):
         '''
         Use the RHT to find the filament orientation and dispersion of each
         branch in the filament.
@@ -635,10 +647,21 @@ class Filament2D(FilamentNDBase):
             branch_array[pix[:, 0] - ymin + radius,
                          pix[:, 1] - xmin + radius] = True
 
-            branch_array = np.fliplr(branch_array)
+            branch_array = np.fliplr(branch_array) # um... why? ra backwards?
 
+            # gradimage subimage corresponding to branch_array so extent of
+            # pix+self.pixel_extents, padded by radius on each side
+            pe=self.pixel_extents
+            if (gradimage<>None).any():
+                gradim_array=self.image_slicer(gradimage,shape)
+                gradim_array=np.fliplr(gradim_array)
+            else:
+                gradim_array=None
+
+            # if gradim_array is provided, R is relative to the gradient of gradimage
             theta, R, quant = rht(branch_array, radius, ntheta,
-                                  background_percentile)
+                                  background_percentile,
+                                  gradimage=gradim_array)
 
             twofive, mean, sevenfive = quant
 
@@ -672,6 +695,8 @@ class Filament2D(FilamentNDBase):
                        fitter=None,
                        try_nonparam=True,
                        use_longest_path=False,
+                       single_branch=False,
+                       branchid=0,
                        add_width_to_length=False,
                        deconvolve_width=True,
                        beamwidth=None,
@@ -754,6 +779,8 @@ class Filament2D(FilamentNDBase):
 
         if use_longest_path:
             skel_array = self.skeleton(pad_size=pad_size, out_type='longpath')
+        elif single_branch:
+            skel_array = self.skeleton(pad_size=pad_size, out_type='branch', branchid=branchid)
         else:
             skel_array = self.skeleton(pad_size=pad_size, out_type='all')
 
@@ -943,8 +970,8 @@ class Filament2D(FilamentNDBase):
                 fwhm_deconv = np.sqrt(fwhm_deconv_sq)
                 fwhm_deconv_err = fwhm * fwhm_err / fwhm_deconv
             else:
-                fwhm_deconv = np.NaN
-                fwhm_deconv_err = np.NaN
+                fwhm_deconv = np.NaN * xunit
+                fwhm_deconv_err = np.NaN * xunit
                 warnings.warn("Width could not be deconvolved from the beam "
                               "width.")
         else:

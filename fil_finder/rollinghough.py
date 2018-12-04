@@ -5,7 +5,7 @@ from scipy.stats import scoreatpercentile
 import matplotlib.pyplot as p
 
 
-def rht(mask, radius, ntheta=180, background_percentile=25, verbose=False):
+def rht(mask, radius, ntheta=180, background_percentile=25, verbose=False, gradimage=None):
     '''
 
     Parameters
@@ -25,6 +25,9 @@ def rht(mask, radius, ntheta=180, background_percentile=25, verbose=False):
                             Percentile of data to subtract off. Background is
                             due to limits on pixel resolution.
 
+    gradimage: at each point along fil, calculate gradient angle in the circular patch,
+           and collect not R = the alignment angle, R= R-(local gradient)
+
     verbose : bool, optional
         Enables plotting.
 
@@ -43,6 +46,11 @@ def rht(mask, radius, ntheta=180, background_percentile=25, verbose=False):
     '''
 
     pad_mask = np.pad(mask.astype(float), radius, padwithnans)
+    if (gradimage<>None).any():
+        dograd=True
+        pad_gradimage=np.pad(gradimage.astype(float), radius, padwithnans)-np.nanmean(gradimage)
+    else:
+        dograd=False
 
     # The theta=0 case isn't handled properly
     theta = np.linspace(np.pi/2., 1.5*np.pi, ntheta)
@@ -50,20 +58,42 @@ def rht(mask, radius, ntheta=180, background_percentile=25, verbose=False):
     # Create a cube of all angle positions
     circle, mesh = circular_region(radius)
     circles_cube = np.empty((ntheta, circle.shape[0], circle.shape[1]))
+    # put step function in here
+    if dograd: steps_cube = np.empty((ntheta, circle.shape[0], circle.shape[1]))
     for posn, ang in enumerate(theta):
         diff = mesh[0]*np.sin(ang) - mesh[1]*np.cos(ang)
+        if dograd: steps_cube[posn,:,:]=2*((diff>0)-0.5)
         diff[np.where(np.abs(diff) < 1.0)] = 0
         circles_cube[posn, :, :] = diff
+        R_grad = np.zeros((ntheta,))
 
     R = np.zeros((ntheta,))
     x, y = np.where(mask != 0.0)
+    extratheta=np.concatenate([theta-np.pi/2,theta-3*np.pi/2])
     for i, j in zip(x, y):
         region = np.tile(circle * pad_mask[i:i+2*radius+1,
                                            j:j+2*radius+1], (ntheta, 1, 1))
         line = region * np.isclose(circles_cube, 0.0)
-
+        if dograd:
+            gradregion=np.tile(circle * pad_gradimage[i:i+2*radius+1,
+                                                  j:j+2*radius+1], (ntheta, 1, 1))
+            diffcube = gradregion * steps_cube
+            diffs = np.nansum(np.nansum(diffcube, axis=2), axis=1)
+            # need angle-average of theta, wtd by diffs
+            # when theta=pi/2, gradient is vertical (angle=0)
+            # so gradangle will be [0,pi] from vertical
+            gradangle=circ_mean(extratheta, weights=np.concatenate([diffs,-diffs]))
+            # circ_mean returns in [-pi,pi]
+            
         if not np.isnan(line).all():
-            R = R + np.nansum(np.nansum(line, axis=2), axis=1)
+            linesum=np.nansum(np.nansum(line, axis=2), axis=1)
+            R = R + linesum
+            if dograd:
+                # line is in [-pi/2,pi/2] from vertical, clockwise (fliplr)
+                # gradangle is [0,pi] from N, clockwise
+                # gradangle=0: line in [-pi/2..pi/2] ok
+                # gradangle=thet: line in [-pi/2-thet..pi/2-thet] - need to roll by thet
+                R_grad = R_grad + np.roll(linesum,-int(gradangle*180/np.pi))
 
     # Check that the ends are close.
     if np.isclose(R[0], R[-1], rtol=1.0):
@@ -73,14 +103,35 @@ def rht(mask, radius, ntheta=180, background_percentile=25, verbose=False):
         raise ValueError("R(-pi/2) should equal R(pi/2). Check input.")
 
     # You're likely to get a somewhat constant background, so subtract it out
-    R = R - np.median(R[R <= scoreatpercentile(R, background_percentile)])
+    Rbg=np.median(R[R <= scoreatpercentile(R, background_percentile)])
+    R = R - Rbg
     if (R < 0.0).any():
         R[R < 0.0] = 0.0  # Ignore negative values after subtraction
+
+    if dograd:
+        R_grad=R_grad[:-1]
+        Rgradbg=np.median(R_grad[R_grad <= scoreatpercentile(R_grad, background_percentile)])
+        R_grad = R_grad - Rgradbg
+        if (R_grad < 0.0).any():
+            R_grad[R_grad < 0.0] = 0.0  # Ignore negative values after subtraction
 
     # Return to [-pi/2, pi/2] interval and position to the correct zero point.
     theta -= np.pi
     R = np.fliplr(R[:, np.newaxis])
 
+    #p.clf()
+    #p.plot(theta,R)
+    #p.plot(theta,np.fliplr(R_grad[:, np.newaxis]))
+    #p.plot(theta,diffs[:-1],linestyle="dotted")
+    #p.plot([gradangle,gradangle],[0,diffs.max()])
+    #p.draw()
+    #import pdb
+    #pdb.set_trace()
+
+    if dograd:
+        # simply replace R with R_grad for calculating means and returning quantities
+        R = np.fliplr(R_grad[:, np.newaxis])
+    
     mean_circ = circ_mean(theta, weights=R)
     twofive, sevenfive = circ_CI(theta, weights=R, u_ci=0.67)
     twofive = twofive[0]
@@ -88,6 +139,7 @@ def rht(mask, radius, ntheta=180, background_percentile=25, verbose=False):
     quantiles = (twofive, mean_circ, sevenfive)
 
     if verbose:
+        p.clf()
         p.subplot(1, 2, 1, polar=True)
         p.plot(2*theta, R, "rD")
         p.plot([2*mean_circ]*2, [0, R.max()], "k")
