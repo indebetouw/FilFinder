@@ -1226,7 +1226,7 @@ class Filament2D(FilamentNDBase):
                 bkg = bkg.value
             return self.radprof_model(dists) - bkg
 
-    def median_brightness(self, image):
+    def median_brightness(self, image, branchid=None):
         '''
         Return the median brightness along the skeleton of the filament.
 
@@ -1245,7 +1245,10 @@ class Filament2D(FilamentNDBase):
         # Do we need to pad the image before slicing?
         input_image = pad_image(image, self.pixel_extents, pad_size)
 
-        skels = self.skeleton(pad_size=pad_size)
+        if branchid:
+            skels = self.skeleton(pad_size=pad_size, out_type="branch", branchid=branchid)
+        else:
+            skels = self.skeleton(pad_size=pad_size)
 
         # If the padded image matches the mask size, don't need additional
         # slicing
