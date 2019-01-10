@@ -41,7 +41,7 @@ eight_conn_posns = [0, 2, 6, 8]
 
 def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
                      distance=250. * u.pc, num_avg=3, verbose=False,
-                     bright_unit="Jy km/s", noise=None, fit_profiles=True):
+                     bright_unit="Jy km/s", noise=None, fit_profiles=True, trim=False):
     '''
     Calculate radial profiles along the main extent of a skeleton (ie. the
     longest path). The skeleton must contain a single branch with no
@@ -80,6 +80,7 @@ def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
     fit_profiles : bool, optional
         When enabled, fits a Gaussian model to the profiles. Otherwise only
         the profiles are returned.
+    trim : True - fit only where there is data - if False, then pad with zeros
 
     Returns
     -------
@@ -136,6 +137,11 @@ def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
     profile_extents = []
     profile_fits = []
     red_chisqs = []
+    sig0s = []
+    if trim:
+        cval=np.nan
+    else:
+        cval=0
 
     for j, i in enumerate(range(num_avg, len(skel_pts) - num_avg)):
         # Calculate the normal direction from the surrounding pixels
@@ -151,28 +157,28 @@ def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
         line_pts = find_path_ends(skel_pts[i], max_pixel, per_vec)
 
         left_profile, left_dists = \
-            profile_line(image, skel_pts[i], line_pts[0])
+            profile_line(image, skel_pts[i], line_pts[0], cval=cval)
         right_profile, right_dists = \
-            profile_line(image, skel_pts[i], line_pts[1])
+            profile_line(image, skel_pts[i], line_pts[1], cval=cval)
 
-        total_profile = np.append(left_profile[::-1], right_profile) * \
+        total_profile = np.append(left_profile[::-1], right_profile[1:]) * \
             bright_unit
 
         if noise is not None:
             left_profile, _ = \
-                profile_line(noise, skel_pts[i], line_pts[0])
+                profile_line(noise, skel_pts[i], line_pts[0], cval=cval)
             right_profile, _ = \
-                profile_line(noise, skel_pts[i], line_pts[1])
-            noise_profile = np.append(left_profile[::-1], right_profile) * \
+                profile_line(noise, skel_pts[i], line_pts[1], cval=cval)
+            noise_profile = np.append(left_profile[::-1], right_profile[1:]) * \
                 bright_unit
         else:
             noise_profile = None
 
         if distance is not None:
-            total_dists = np.append(-left_dists[::-1], right_dists) \
+            total_dists = np.append(-left_dists[::-1], right_dists[1:]) \
                 * u.pix * phys_per_pix
         else:
-            total_dists = np.append(-left_dists[::-1], right_dists) \
+            total_dists = np.append(-left_dists[::-1], right_dists[1:]) \
                 * u.pix * deg_per_pix
 
         if noise is not None:
@@ -187,20 +193,30 @@ def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
 
         if fit_profiles:
             # Now fit!
-            profile_fit, profile_fit_err, red_chisq = \
-                gauss_fit(total_dists.value, total_profile.value,
-                          sigma=noise_profile)
-
+            z=np.where(np.isnan(total_profile)==False)[0]
+            if noise_profile==None:
+                profile_fit, profile_fit_err, red_chisq = \
+                    gauss_fit(total_dists.value[z], total_profile.value[z],
+                              sigma=None)
+            else:
+                profile_fit, profile_fit_err, red_chisq = \
+                    gauss_fit(total_dists.value[z], total_profile.value[z],
+                              sigma=noise_profile[z])
+            # p0 = amp, std, bg             
             profile_fits.append(np.hstack([profile_fit, profile_fit_err]))
             red_chisqs.append(red_chisq)
 
+        sig0=np.sqrt(np.nansum(total_profile.value[z]*(total_dists.value[z])**2)/np.nansum(total_profile.value[z]))
+        sig0s.append(sig0)
         if verbose:
+            p.clf()
             p.subplot(121)
             p.imshow(image, origin='lower')
             p.contour(skeleton, colors='r')
-            p.plot(skel_pts[i][1], skel_pts[i][0], 'bD')
+            p.plot(skel_pts[i][1], skel_pts[i][0], 'bo', mfc="none")
             p.plot(line_pts[0][1], line_pts[0][0], 'bD')
             p.plot(line_pts[1][1], line_pts[1][0], 'bD')
+            p.plot([line_pts[0][1],line_pts[1][1]],[line_pts[0][0],line_pts[1][0]],'g')
 
             p.subplot(122)
             p.plot(total_dists, total_profile, 'bD')
@@ -208,6 +224,8 @@ def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
                               total_dists.max().value, 100)
             if fit_profiles:
                 p.plot(pts, gaussian(pts, *profile_fit), 'r')
+                
+            p.plot(pts, gaussian(pts, *[total_profile.max(),sig0,0]), 'g')
 
             if distance is not None:
                 unit = (u.pix * phys_per_pix).unit.to_string()
@@ -217,7 +235,14 @@ def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
             p.ylabel("Surface Brightness (" + bright_unit.to_string() + ")")
             p.tight_layout()
             p.show()
+            import pylab as pl
+            pl.draw()
+            print profile_fit
+            print profile_fit_err*np.sqrt(red_chisq)
+            import pdb
+            pdb.set_trace()
 
+            
     if fit_profiles:
         profile_fits = np.asarray(profile_fits)
         red_chisqs = np.asarray(red_chisqs)
@@ -233,6 +258,8 @@ def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
         tab.add_index("Number")
 
         tab["Red Chisq"] = red_chisqs
+
+        tab["Std Dev NoFit"] = sig0s
 
         for i, (name, is_bright) in enumerate(zip(colnames, in_bright_units)):
             if is_bright:
@@ -260,16 +287,24 @@ def perpendicular(a):
     return b
 
 
-def walk_through_skeleton(skeleton):
+def walk_through_skeleton(skeleton, debug=False):
     '''
     Starting from one end, walk through a skeleton in order. Intended for use
     with skeletons that contain no branches.
     '''
 
+    if debug:
+        import pylab as pl
+        pl.ion()
+        pl.clf()
+        pl.imshow(skeleton,origin="bottom")
+    
     # Calculate the end points
     end_pts = return_ends(skeleton)
     if len(end_pts) != 2:
-        raise ValueError("Skeleton must contain no intersections.")
+        # raise ValueError("Skeleton must contain no intersections.")
+        "Skeleton must contain no intersections. #end_pts=",len(end_pts)
+        return []
 
     # Force the first end point to be closest to the image origin.
     if two_point_dist(end_pts[1], [0, 0]) < two_point_dist(end_pts[0], [0, 0]):
@@ -281,6 +316,7 @@ def walk_through_skeleton(skeleton):
     yy = yy.ravel()
     xx = xx.ravel()
 
+    ny,nx=skeleton.shape
     for i in range(all_pts):
         if i == 0:
             ordered_pts = [end_pts[0]]
@@ -288,11 +324,70 @@ def walk_through_skeleton(skeleton):
         else:
             # Check for neighbors
             y, x = prev_pt
-            # Extract the connected region
-            neighbors = skeleton[y - 1:y + 2, x - 1:x + 2].ravel()
-            # Define the corresponding array indices.
-            yy_inds = yy + y
-            xx_inds = xx + x
+            # Extract the connected region - requires padding of 1?
+            if y>0: 
+                if y<(ny-1):
+                    if x>0:
+                        if x<(nx-1):                        
+                            neighbors = skeleton[y - 1:y + 2, x - 1:x + 2].ravel()
+                            # Define the corresponding array indices.
+#                            yy_inds = y + np.array([-1, -1, -1,  0,  0,  0,  1,  1,  1])
+#                            xx_inds = x + np.array([-1,  0,  1, -1,  0,  1, -1,  0,  1])
+                            yy_inds = yy + y
+                            xx_inds = xx + x
+                        else:
+                            neighbors = skeleton[y - 1:y + 2, x - 1:x + 1].ravel()
+                            yy_inds = y + np.array([-1, -1,  0,  0,  1,  1])
+                            xx_inds = x + np.array([-1,  0, -1,  0, -1,  0])
+                    else: # x==0
+                        if x<(nx-1):                        
+                            neighbors = skeleton[y - 1:y + 2, x:x + 2].ravel()
+                            yy_inds = y + np.array([-1, -1,  0,  0,  1,  1])
+                            xx_inds = x + np.array([ 0,  1,  0,  1,  0,  1])
+                        else:
+                            print "skel too small in x"
+                            stop
+                else: # y=(ny-1)
+                    if x>0:
+                        if x<(nx-1):                        
+                            neighbors = skeleton[y - 1:y + 1, x - 1:x + 2].ravel()
+                            yy_inds = y + np.array([-1, -1, -1,  0,  0,  0])
+                            xx_inds = x + np.array([-1,  0,  1, -1,  0,  1])
+                        else:
+                            neighbors = skeleton[y - 1:y + 1, x - 1:x + 1].ravel()
+                            yy_inds = y + np.array([-1, -1,  0,  0])
+                            xx_inds = x + np.array([-1,  0, -1,  0])
+                    else: # x==0
+                        if x<(nx-1):                        
+                            neighbors = skeleton[y - 1:y + 1, x:x + 2].ravel()
+                            yy_inds = y + np.array([-1, -1,  0,  0,  1,  1])
+                            xx_inds = x + np.array([ 0,  1,  0,  1,  0,  1])
+                        else:
+                            print "skel too small in x"
+                            stop
+            else: #y==0
+                if y<(ny-1):
+                    if x>0:
+                        if x<(nx-1):                        
+                            neighbors = skeleton[y:y + 2, x - 1:x + 2].ravel()
+                            yy_inds = y + np.array([ 0,  0,  0,  1,  1,  1])
+                            xx_inds = x + np.array([-1,  0,  1, -1,  0,  1])
+                        else:
+                            neighbors = skeleton[y:y + 2, x - 1:x + 1].ravel()
+                            yy_inds = y + np.array([ 0,  0,  1,  1])
+                            xx_inds = x + np.array([-1,  0, -1,  0])
+                    else: # x==0
+                        if x<(nx-1):                        
+                            neighbors = skeleton[y:y + 2, x:x + 2].ravel()
+                            yy_inds = y + np.array([0,  0,  1,  1])
+                            xx_inds = x + np.array([0,  1,  0,  1])
+                        else:
+                            print "skel too small in x"
+                            stop
+                else:
+                    print "skel too small in y"
+                    stop
+
 
             hits = [int(elem) for elem in np.argwhere(neighbors)]
             # Remove the centre point and any points already in the list
@@ -312,7 +407,8 @@ def walk_through_skeleton(skeleton):
             elif num_hits == 1:
                 # You have found the next point
                 posn = hits[0]
-                next_pt = (y + yy[posn], x + xx[posn])
+#                next_pt = (y + yy[posn], x + xx[posn])
+                next_pt = (yy_inds[posn], xx_inds[posn])
                 ordered_pts.append(next_pt)
             else:
                 # There's at least a couple neighbours (for some reason)
@@ -323,9 +419,14 @@ def walk_through_skeleton(skeleton):
                         break
                 else:
                     raise ValueError("Disconnected eight-connected pixels?")
-                next_pt = (y + yy[posn], x + xx[posn])
+#                next_pt = (y + yy[posn], x + xx[posn])
+                next_pt = (yy_inds[posn], xx_inds[posn])
                 ordered_pts.append(next_pt)
             prev_pt = next_pt
+    if debug:        
+        pl.plot(pl.array(ordered_pts)[:,1],pl.array(ordered_pts)[:,0],'o')
+        import pdb
+        pdb.set_trace()
 
     return ordered_pts
 
@@ -413,9 +514,8 @@ def gaussian(x, *p):
     p : tuple
         Components are:
         * p[0] Amplitude
-        * p[1] Mean
-        * p[2] Width
-        * p[3] Background
+        * p[1] Sigma
+        * p[2] Background
     '''
     return (p[0] - p[2]) * np.exp(-1 * np.power(x, 2) /
                                   (2 * np.power(p[1], 2))) + p[2]
@@ -444,13 +544,17 @@ def gauss_fit(distance, rad_profile, sigma=None):
         The reduced chi-squared value for the fit.
     '''
 
-    p0 = (np.max(rad_profile), np.std(distance), np.min(rad_profile))
-
+    p0=(0.1,0.1,0)
     try:
+        sig=np.sqrt(np.nansum((distance*rad_profile)**2))/np.nansum(rad_profile)
+        #    p0 = (np.max(rad_profile), np.std(distance), np.min(rad_profile))
+        p0 = (np.max(rad_profile), sig, np.min(rad_profile))
+
         fit, cov, info, _, _ = \
             curve_fit(gaussian, distance, rad_profile, p0=p0,
                       maxfev=100 * (len(distance) + 1), sigma=sigma,
                       absolute_sigma=True, full_output=True)
+        # pcov(absolute_sigma=False) = pcov(absolute_sigma=True) * chisq(popt)/(M-N)
         fit_errors = np.sqrt(np.diag(cov))
         red_chisq = (info['fvec']**2).sum() / (len(info['fvec']) - len(fit))
 
