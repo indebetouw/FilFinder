@@ -149,6 +149,9 @@ class FilFinder2D(BaseInfoMixin):
             mask[np.isnan(mask)] = 0.0
             self.mask = mask
 
+    def set_image(self,imdata):
+        self._image=imdata
+        
     def preprocess_image(self, skip_flatten=False, flatten_percent=None):
         '''
         Preprocess and flatten the image before running the masking routine.
@@ -627,10 +630,11 @@ class FilFinder2D(BaseInfoMixin):
                           range(1, num + 1)]
 
         # Now loop over the skeleton analysis for each filament object
+        self.number_of_filaments = num
         for n, fil in enumerate(self.filaments):
             savename = "{0}_{1}".format(save_name, n)
             if verbose:
-                print("Filament: %s / %s" % (n + 1, self.number_of_filaments))
+                print("Filament: %s / %s" % (n + 1, num))
 
             fil.skeleton_analysis(self.image, verbose=verbose,
                                   save_png=save_png,
@@ -640,7 +644,6 @@ class FilFinder2D(BaseInfoMixin):
                                   branch_thresh=self.branch_thresh,
                                   max_prune_iter=max_prune_iter)
 
-        self.number_of_filaments = num
         self.array_offsets = [fil.pixel_extents for fil in self.filaments]
 
         branch_properties = {}
@@ -921,7 +924,7 @@ class FilFinder2D(BaseInfoMixin):
             if verbose:
                 print("Filament: %s / %s" % (n + 1, self.number_of_filaments))
 
-            fil.width_analysis(self.image, all_skeleton_array=self.skeleton,
+           fil.width_analysis(self.image, all_skeleton_array=self.skeleton,
                                max_dist=max_dist,
                                pad_to_distance=pad_to_distance,
                                fit_model=fit_model,

@@ -628,7 +628,8 @@ def longest_path(edge_list, nodes, verbose=False,
                 p.axis('off')
 
                 if save_png:
-                    p.savefig(os.path.join(save_name,save_name+(".longest_path.%i.png"%n)))
+                    #p.savefig(os.path.join(save_name,save_name+(".longest_path.%i.png"%n)))
+                    p.savefig(save_name+(".longest_path.%i.png"%n))
                     p.close()
                 if verbose:
                     p.show()
@@ -972,7 +973,8 @@ def main_length(max_path, edge_list, labelisofil, interpts, branch_lengths,
                      interpolation="nearest")
 
             if save_png:
-                p.savefig(save_name+"/"+save_name+".main_length."+str(num)+".png")
+                #p.savefig(save_name+"/"+save_name+".main_length."+str(num)+".png")
+                p.savefig(save_name+".main_length."+str(num)+".png")
                 p.close()
             if verbose:
                 p.show()

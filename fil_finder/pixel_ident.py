@@ -677,7 +677,8 @@ def make_final_skeletons(labelisofil, inters, verbose=False, save_png=False,
             p.imshow(cleaned_array, origin='lower', interpolation='nearest')
 
             if save_png:
-                p.savefig(save_name+"/"+save_name+".final_skel."+str(n)+".png")
+                #p.savefig(save_name+"/"+save_name+".final_skel."+str(n)+".png")
+                p.savefig(save_name+".final_skel."+str(n)+".png")
                 p.close()
             if verbose:
                 p.show()

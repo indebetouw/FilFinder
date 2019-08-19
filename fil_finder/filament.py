@@ -127,7 +127,7 @@ class Filament2D(FilamentNDBase):
 
         return out_arr
 
-    def skeleton(self, pad_size=0, corner_pix=None, out_type='all'):
+    def skeleton(self, pad_size=0, corner_pix=None, out_type='all', branchid=None):
         '''
         Create a mask from the pixel coordinates.
 
@@ -882,12 +882,12 @@ class Filament2D(FilamentNDBase):
             if self._radprof_model._supports_unit_fitting:
                 self._radprof_model.amplitude_0 = fit[0] * yunit
                 self._radprof_model.mean_0 = 0.0 * xunit
-                self._radprof_model.sigma_0 = fit[1] * xunit
+                self._radprof_model.stddev_0 = fit[1] * xunit
                 self._radprof_model.amplitude_1 = fit[2] * yunit
             else:
                 self._radprof_model.amplitude_0 = fit[0]
                 self._radprof_model.mean_0 = 0.0
-                self._radprof_model.sigma_0 = fit[1]
+                self._radprof_model.stddev_0 = fit[1]
                 self._radprof_model.amplitude_1 = fit[2]
 
             # Slice out the FWHM and add units
@@ -1087,7 +1087,7 @@ class Filament2D(FilamentNDBase):
 
         conv_points = np.linspace(np.min(conv_dist),
                                   np.max(conv_dist), 5 * len(conv_dist))
-        ax.plot(conv_points, model(points), "r")
+        ax.plot(conv_points.value, model(points).value, "r")
         ax.set_xlabel(r'Radial Distance ({})'.format(xunit))
         ax.set_ylabel(r'Intensity ({})'.format(self._yunit))
         ax.grid(True)
