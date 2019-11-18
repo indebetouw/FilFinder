@@ -929,12 +929,12 @@ class Filament2D(FilamentNDBase):
             if self._radprof_model._supports_unit_fitting:
                 self._radprof_model.amplitude_0 = fit[0] * yunit
                 self._radprof_model.mean_0 = 0.0 * xunit
-                self._radprof_model.sigma_0 = fit[1] * xunit
+                self._radprof_model.stddev_0 = fit[1] * xunit
                 self._radprof_model.amplitude_1 = fit[2] * yunit
             else:
                 self._radprof_model.amplitude_0 = fit[0]
                 self._radprof_model.mean_0 = 0.0
-                self._radprof_model.sigma_0 = fit[1]
+                self._radprof_model.stddev_0 = fit[1]
                 self._radprof_model.amplitude_1 = fit[2]
 
             # Slice out the FWHM and add units
