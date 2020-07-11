@@ -634,6 +634,8 @@ class FilFinder2D(BaseInfoMixin):
                                      converter=self.converter) for lab in
                           range(1, num + 1)]
 
+        self.number_of_filaments = num
+
         # Now loop over the skeleton analysis for each filament object
         for n, fil in enumerate(self.filaments):
             savename = "{0}_{1}".format(save_name, n)
@@ -648,7 +650,6 @@ class FilFinder2D(BaseInfoMixin):
                                   branch_thresh=self.branch_thresh,
                                   max_prune_iter=max_prune_iter)
 
-        self.number_of_filaments = num
         self.array_offsets = [fil.pixel_extents for fil in self.filaments]
 
         branch_properties = {}
@@ -1063,12 +1064,21 @@ class FilFinder2D(BaseInfoMixin):
             for each filament.
         '''
 
-        median_bright = []
+        if len(self.filaments) == 0:
+            return np.array([])
 
-        for fil in self.filaments:
-            median_bright.append(fil.median_brightness(self.image))
+        med_bright0 = self.filaments[0].median_brightness(self.image)
 
-        return np.array(median_bright)
+        median_bright = np.zeros(len(self.filaments))
+
+        if hasattr(med_bright0, 'unit'):
+            median_bright = median_bright * med_bright0.unit
+            median_bright[0] = med_bright0
+
+        for i, fil in enumerate(self.filaments):
+            median_bright[i] = fil.median_brightness(self.image)
+
+        return median_bright
 
     def filament_model(self, max_radius=None, bkg_subtract=True,
                        bkg_mod_index=2):
@@ -1261,21 +1271,35 @@ class FilFinder2D(BaseInfoMixin):
 
         return tables
 
-    def save_fits(self, save_name=None, **kwargs):
+    def save_fits(self, save_name=None,
+                  save_longpath_skeletons=True,
+                  save_model=True,
+                  model_kwargs={}, **kwargs):
         '''
         Save the mask and the skeleton array as FITS files. The header includes
         the settings used to create them.
 
-        The mask, skeleton, longest skeletons, and model are included in the
-        outputted file. The skeletons are labeled to match their order in
-        `~FilFinder2D.filaments`.
+        The mask, skeleton, (optional) longest skeletons, and (optional)
+        model are included in the outputted file. The skeletons are labeled to
+        match their order in `~FilFinder2D.filaments`.
 
         Parameters
         ----------
         save_name : str, optional
             The prefix for the saved file. If None, the save name specified
             when `~FilFinder2D` was first called.
-        kwargs : Passed to `~FilFinder2D.filament_model`.
+        save_longpath_skeletons : bool, optional
+            Save a FITS extension with the longest path skeleton array.
+            Default is `True`. Requires `~FilFinder2D.analyze_skeletons`
+            to be run.
+        save_model : bool, optional
+            Save a FITS extension with the longest path skeleton array.
+            Default is `True`. Requires `~FilFinder2D.find_widths`
+            to be run.
+        model_kwargs : dict, optional
+            Passed to `~FilFinder2D.filament_model`.
+        kwargs : Passed to `~astropy.io.fits.PrimaryHDU.writeto`.
+
         '''
 
         if save_name is None:
@@ -1337,33 +1361,35 @@ class FilFinder2D(BaseInfoMixin):
         out_hdu.append(fits.ImageHDU(labels, header=new_hdr_skel))
 
         # Longest Paths
-        labels_lp = nd.label(self.skeleton_longpath, eight_con())[0]
-        out_hdu.append(fits.ImageHDU(labels_lp,
-                                     header=new_hdr_skel))
+        if save_longpath_skeletons:
+            labels_lp = nd.label(self.skeleton_longpath, eight_con())[0]
+            out_hdu.append(fits.ImageHDU(labels_lp,
+                                         header=new_hdr_skel))
 
-        model = self.filament_model(**kwargs)
-        if hasattr(model, 'unit'):
-            model = model.value
+        if save_model:
+            model = self.filament_model(**model_kwargs)
+            if hasattr(model, 'unit'):
+                model = model.value
 
-        model_hdr = new_hdr.copy()
-        model_hdr['COMMENT'] = "Image generated from fitted filament models."
-        if self.header is not None:
-            bunit = self.header.get('BUNIT', None)
-            if bunit is not None:
-                model_hdr['BUNIT'] = bunit
-            else:
-                model_hdr['BUNIT'] = ""
-        else:
-            model_hdr['BUNIT'] = ""
+            model_hdr = new_hdr.copy()
+            model_hdr['COMMENT'] = "Image generated from fitted filament models."
+            if self.header is not None:
+                bunit = self.header.get('BUNIT', None)
+                if bunit is not None:
+                    model_hdr['BUNIT'] = bunit
+                else:
+                    model_hdr['BUNIT'] = ""
 
-        model_hdr['BITPIX'] = fits.DTYPE2BITPIX[str(model.dtype)]
-        model_hdu = fits.ImageHDU(model, header=model_hdr)
+            model_hdr['BITPIX'] = fits.DTYPE2BITPIX[str(model.dtype)]
+            model_hdu = fits.ImageHDU(model, header=model_hdr)
 
-        out_hdu.append(model_hdu)
+            out_hdu.append(model_hdu)
 
-        out_hdu.writeto("{0}_image_output.fits".format(save_name))
+        out_hdu.writeto("{0}_image_output.fits".format(save_name),
+                        **kwargs)
 
     def save_stamp_fits(self, save_name=None, pad_size=20 * u.pix,
+                        model_kwargs={},
                         **kwargs):
         '''
         Save stamps of each filament image, skeleton, longest-path skeleton,
@@ -1379,7 +1405,10 @@ class FilFinder2D(BaseInfoMixin):
             when `~FilFinder2D` was first called.
         stamps : bool, optional
             Enables saving of individual stamps
-        kwargs : Passed to `~Filament2D.save_fits`.
+        model_kwargs : dict, optional
+            Passed to `~FilFinder2D.filament_model`.
+        kwargs : Passed to `~astropy.io.fits.PrimaryHDU.writeto`.
+
         '''
         if save_name is None:
             save_name = self.save_name
@@ -1391,4 +1420,5 @@ class FilFinder2D(BaseInfoMixin):
             savename = "{0}_stamp_{1}.fits".format(save_name, n)
 
             fil.save_fits(savename, self.image, pad_size=pad_size,
+                          model_kwargs=model_kwargs,
                           **kwargs)

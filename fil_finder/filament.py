@@ -122,7 +122,9 @@ class Filament2D(FilamentNDBase):
 
         out_arr = extract_array(image, out_shape, arr_cent)
 
-        if hasattr(image, "unit"):
+        # astropy v4.0 now retains the unit. So only add a unit
+        # when out_arr isn't a Quantity
+        if hasattr(image, "unit") and not hasattr(out_arr, 'unit'):
             out_arr = out_arr * image.unit
 
         return out_arr
@@ -233,6 +235,7 @@ class Filament2D(FilamentNDBase):
 
         # Must have a pad size of 1 for the morphological operations.
         pad_size = 1
+        self._pad_size = pad_size
 
         branch_thresh = self._converter.to_pixel(branch_thresh)
 
@@ -312,8 +315,15 @@ class Filament2D(FilamentNDBase):
             # edge_match = iso.numerical_edge_match('weight', 1)
             # if nx.is_isomorphic(prev_G, G[0],
             #                     edge_match=edge_match):
-            if prev_G.node == G[0].node:
-                break
+
+            # the node attribute was removed in 2.4.
+            if hasattr(G, 'node'):
+                if prev_G.node == G[0].node:
+                    break
+
+            if hasattr(G, 'nodes'):
+                if prev_G.nodes == G[0].nodes:
+                    break
 
             prev_G = G[0]
             iter += 1
@@ -397,12 +407,31 @@ class Filament2D(FilamentNDBase):
         '''
         return self._branch_properties
 
-    @property
-    def branch_pts(self):
+    def branch_pts(self, img_coords=False):
         '''
         Pixels within each skeleton branch.
+
+        Parameters
+        ----------
+        img_coords : bool
+            Return the branch pts in coordinates of the original image.
         '''
-        return self.branch_properties['pixels']
+        if not img_coords:
+            return self.branch_properties['pixels']
+
+        # Transform from per-filament to image coords
+        img_branch_pts = []
+        for bpts in self.branch_properties['pixels']:
+
+            bpts_copy = bpts.copy()
+
+            bpts_copy[:, 0] = bpts[:, 0] + self.pixel_extents[0][0] - self._pad_size
+            bpts_copy[:, 1] = bpts[:, 1] + self.pixel_extents[0][1] - self._pad_size
+
+            img_branch_pts.append(bpts_copy)
+
+        return img_branch_pts
+
 
     @property
     def intersec_pts(self):
@@ -626,7 +655,7 @@ class Filament2D(FilamentNDBase):
         iqrs = []
 
         # Make padded arrays from individual branches
-        for i, (pix, length) in enumerate(zip(self.branch_pts,
+        for i, (pix, length) in enumerate(zip(self.branch_pts(img_coords=False),
                                               self.branch_properties['length'])):
 
             if length.value < min_branch_length:
@@ -927,14 +956,32 @@ class Filament2D(FilamentNDBase):
             # Make the equivalent Gaussian model w/ a background
             self._radprof_model = Gaussian1D() + Const1D()
             if self._radprof_model._supports_unit_fitting:
-                self._radprof_model.amplitude_0 = fit[0] * yunit
+                add_unit_if_none = lambda x, unit: x * unit if not hasattr(x, 'unit') else x
+
+                self._radprof_model.amplitude_0 = add_unit_if_none(fit[0], yunit)
                 self._radprof_model.mean_0 = 0.0 * xunit
-                self._radprof_model.stddev_0 = fit[1] * xunit
-                self._radprof_model.amplitude_1 = fit[2] * yunit
+                # At some point this parameter name changed? Or something?
+                # Anyways, you can set whatever attribute name you want and it
+                # doesn't complain. So catch those cases manually.
+                if hasattr(self._radprof_model, 'sigma_0'):
+                    self._radprof_model.sigma_0 = add_unit_if_none(fit[1], xunit)
+                if hasattr(self._radprof_model, 'stddev_0'):
+                    self._radprof_model.stddev_0 = add_unit_if_none(fit[1], xunit)
+                else:
+                    raise AttributeError("Cannot find stddev parameter.")
+
+                self._radprof_model.amplitude_1 = add_unit_if_none(fit[0], yunit)
+
             else:
                 self._radprof_model.amplitude_0 = fit[0]
                 self._radprof_model.mean_0 = 0.0
-                self._radprof_model.stddev_0 = fit[1]
+                self._radprof_model.sigma_0 = fit[1]
+                if hasattr(self._radprof_model, 'sigma_0'):
+                    self._radprof_model.sigma_0 = fit[1]
+                if hasattr(self._radprof_model, 'stddev_0'):
+                    self._radprof_model.stddev_0 = fit[1]
+                else:
+                    raise AttributeError("Cannot find stddev parameter.")
                 self._radprof_model.amplitude_1 = fit[2]
 
             # Slice out the FWHM and add units
@@ -970,8 +1017,8 @@ class Filament2D(FilamentNDBase):
                 fwhm_deconv = np.sqrt(fwhm_deconv_sq)
                 fwhm_deconv_err = fwhm * fwhm_err / fwhm_deconv
             else:
-                fwhm_deconv = np.NaN * xunit
-                fwhm_deconv_err = np.NaN * xunit
+                fwhm_deconv = np.NaN * fwhm.unit
+                fwhm_deconv_err = np.NaN * fwhm.unit
                 warnings.warn("Width could not be deconvolved from the beam "
                               "width.")
         else:
@@ -1442,7 +1489,8 @@ class Filament2D(FilamentNDBase):
         return tab
 
     def save_fits(self, savename, image, pad_size=20 * u.pix, header=None,
-                  **model_kwargs):
+                  model_kwargs={},
+                  **kwargs):
         '''
         Save a stamp of the image centered on the filament, the skeleton,
         the longest path skeleton, and the model.
@@ -1456,7 +1504,9 @@ class Filament2D(FilamentNDBase):
         header : `~astropy.io.fits.Header`, optional
             Provide a FITS header to save to. If `~Filament2D` was
             given WCS information, this will be used if no header is given.
-        model_kwargs : Passed to `~Filament2D.model_image`.
+        model_kwargs : dict, optional
+            Passed to `~Filament2D.model_image`.
+        kwargs : Passed to `~astropy.io.fits.PrimaryHDU.writeto`.
 
         '''
 
@@ -1488,6 +1538,10 @@ class Filament2D(FilamentNDBase):
             else:
                 header = fits.Header()
 
+        # Strip off units if the image is a Quantity
+        if hasattr(input_image, 'unit'):
+            input_image = input_image.value.copy()
+
         hdu = fits.PrimaryHDU(input_image, header)
 
         skel_hdr = header.copy()
@@ -1495,15 +1549,15 @@ class Filament2D(FilamentNDBase):
         skel_hdr['COMMENT'] = "Skeleton created by fil_finder on " + \
             time.strftime("%c")
 
-        skel_hdu = fits.ImageHDU(skels.astype(int, skel_hdr))
+        skel_hdu = fits.ImageHDU(skels.astype(int), skel_hdr)
 
-        skel_lp_hdu = fits.ImageHDU(skels_lp.astype(int, skel_hdr))
+        skel_lp_hdu = fits.ImageHDU(skels_lp.astype(int), skel_hdr)
 
         model_hdu = fits.ImageHDU(model, header)
 
         hdulist = fits.HDUList([hdu, skel_hdu, skel_lp_hdu, model_hdu])
 
-        hdulist.writeto(savename)
+        hdulist.writeto(savename, **kwargs)
 
     def to_pickle(self, savename):
         '''

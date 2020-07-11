@@ -10,6 +10,7 @@ from .. import fil_finder_2D, FilFinder2D
 from .testing_utils import generate_filament_model
 
 
+@pytest.mark.openfiles_ignore
 def test_simple_filament_compareold():
     '''
     Check the outputs using a simple straight filament with a Gaussian profile.
@@ -185,7 +186,10 @@ def test_simple_filament_compareold():
     # Compare saving filament stamps.
     from astropy.io import fits
 
-    fil1.save_fits("test_image_output.fits", test.image)
+    if os.path.exists("test_image_output.fits"):
+        os.remove("test_image_output.fits")
+
+    fil1.save_fits("test_image_output.fits", test.image, overwrite=True)
 
     hdu = fits.open("test_image_output.fits")
     skel = fil1.skeleton(pad_size=20)
@@ -203,7 +207,7 @@ def test_simple_filament_compareold():
     hdu.close()
     del hdu
 
-    test.save_stamp_fits()
+    test.save_stamp_fits(overwrite=True)
     hdu = fits.open("test1_stamp_0.fits")
     skel = fil1.skeleton(pad_size=20)
     npt.assert_allclose(skel, hdu[1].data.astype(bool))
@@ -221,8 +225,10 @@ def test_simple_filament_compareold():
     del hdu
 
     # Compare saving whole skeleton/mask/model
+    if os.path.exists("test_image_output.fits"):
+        os.remove("test_image_output.fits")
 
-    test.save_fits()
+    test.save_fits(overwrite=True)
     hdu = fits.open("test1_image_output.fits")
 
     mod = test.filament_model()
@@ -234,11 +240,12 @@ def test_simple_filament_compareold():
     npt.assert_allclose(test.skeleton_longpath, hdu[2].data > 0)
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test1_image_output.fits")
+    # os.remove("test1_image_output.fits")
     hdu.close()
     del hdu
 
 
+@pytest.mark.openfiles_ignore
 def test_simple_filament_noheader():
     '''
     Check the outputs using a simple straight filament with a Gaussian profile.
@@ -275,6 +282,21 @@ def test_simple_filament_noheader():
     npt.assert_allclose(np.pi / 2., test.orientation_branches[0][0].value)
 
     fil1 = test.filaments[0]
+
+    # Compare the branch pts with and without image coordinates
+    branch_pts = fil1.branch_pts(img_coords=False)
+    branch_pts_img = fil1.branch_pts(img_coords=True)
+
+    # Should be sliced down to a single pixel skeleton
+    assert len(branch_pts) == 1
+    # Padded by 1 for morphological operations
+    assert (branch_pts[0][:, 0] == 1).all()
+    assert (branch_pts[0][:, 1] == np.arange(1, 151)).all()
+
+    # Image coordinate branch pts should match the skeleton
+    skel_pts = np.where(test.skeleton)
+    assert (branch_pts_img[0][:, 0] == skel_pts[0]).all()
+    assert (branch_pts_img[0][:, 1] == skel_pts[1]).all()
 
     # Compare lengths
     # Straight skeleton, so length is sum minus 1. Then add the FWHM width on
@@ -396,7 +418,10 @@ def test_simple_filament_noheader():
     # Compare saving filament stamps.
     from astropy.io import fits
 
-    fil1.save_fits("test_image_output.fits", test.image)
+    # if os.path.exists("test_image_output.fits"):
+    #     os.remove("test_image_output.fits")
+
+    fil1.save_fits("test_image_output.fits", test.image, overwrite=True)
 
     hdu = fits.open("test_image_output.fits")
     skel = fil1.skeleton(pad_size=20)
@@ -410,11 +435,11 @@ def test_simple_filament_noheader():
         mod = mod.value
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test_image_output.fits")
+    # os.remove("test_image_output.fits")
     hdu.close()
     del hdu
 
-    test.save_stamp_fits()
+    test.save_stamp_fits(overwrite=True)
     hdu = fits.open("test1_stamp_0.fits")
     skel = fil1.skeleton(pad_size=20)
     npt.assert_allclose(skel, hdu[1].data.astype(bool))
@@ -427,13 +452,15 @@ def test_simple_filament_noheader():
         mod = mod.value
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test1_stamp_0.fits")
+    # os.remove("test1_stamp_0.fits")
     hdu.close()
     del hdu
 
     # Compare saving whole skeleton/mask/model
+    # if os.path.exists("test_image_output.fits"):
+    #     os.remove("test_image_output.fits")
 
-    test.save_fits()
+    test.save_fits(overwrite=True)
     hdu = fits.open("test1_image_output.fits")
 
     mod = test.filament_model()
@@ -445,7 +472,7 @@ def test_simple_filament_noheader():
     npt.assert_allclose(test.skeleton_longpath, hdu[2].data > 0)
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test1_image_output.fits")
+    # os.remove("test1_image_output.fits")
     hdu.close()
     del hdu
 
@@ -609,8 +636,10 @@ def test_simple_filament_noheader_angscale():
 
     # Compare saving filament stamps.
     from astropy.io import fits
+    # if os.path.exists("test_image_output.fits"):
+    #     os.remove("test_image_output.fits")
 
-    fil1.save_fits("test_image_output.fits", test.image)
+    fil1.save_fits("test_image_output.fits", test.image, overwrite=True)
 
     hdu = fits.open("test_image_output.fits")
     skel = fil1.skeleton(pad_size=20)
@@ -624,11 +653,11 @@ def test_simple_filament_noheader_angscale():
         mod = mod.value
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test_image_output.fits")
+    # os.remove("test_image_output.fits")
     hdu.close()
     del hdu
 
-    test.save_stamp_fits()
+    test.save_stamp_fits(overwrite=True)
     hdu = fits.open("test1_stamp_0.fits")
     skel = fil1.skeleton(pad_size=20)
     npt.assert_allclose(skel, hdu[1].data.astype(bool))
@@ -641,13 +670,15 @@ def test_simple_filament_noheader_angscale():
         mod = mod.value
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test1_stamp_0.fits")
+    # os.remove("test1_stamp_0.fits")
     hdu.close()
     del hdu
 
     # Compare saving whole skeleton/mask/model
+    # if os.path.exists("test_image_output.fits"):
+    #     os.remove("test_image_output.fits")
 
-    test.save_fits()
+    test.save_fits(overwrite=True)
     hdu = fits.open("test1_image_output.fits")
 
     mod = test.filament_model()
@@ -659,7 +690,7 @@ def test_simple_filament_noheader_angscale():
     npt.assert_allclose(test.skeleton_longpath, hdu[2].data > 0)
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test1_image_output.fits")
+    # os.remove("test1_image_output.fits")
     hdu.close()
     del hdu
 
@@ -819,7 +850,10 @@ def test_simple_filament_nodistance():
     # Compare saving filament stamps.
     from astropy.io import fits
 
-    fil1.save_fits("test_image_output.fits", test.image)
+    # if os.path.exists("test_image_output.fits"):
+    #     os.remove("test_image_output.fits")
+
+    fil1.save_fits("test_image_output.fits", test.image, overwrite=True)
 
     hdu = fits.open("test_image_output.fits")
     skel = fil1.skeleton(pad_size=20)
@@ -833,11 +867,11 @@ def test_simple_filament_nodistance():
         mod = mod.value
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test_image_output.fits")
     hdu.close()
     del hdu
+    os.remove("test_image_output.fits")
 
-    test.save_stamp_fits()
+    test.save_stamp_fits(overwrite=True)
     hdu = fits.open("test1_stamp_0.fits")
     skel = fil1.skeleton(pad_size=20)
     npt.assert_allclose(skel, hdu[1].data.astype(bool))
@@ -850,13 +884,13 @@ def test_simple_filament_nodistance():
         mod = mod.value
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test1_stamp_0.fits")
+    # os.remove("test1_stamp_0.fits")
     hdu.close()
     del hdu
 
     # Compare saving whole skeleton/mask/model
 
-    test.save_fits()
+    test.save_fits(overwrite=True)
     hdu = fits.open("test1_image_output.fits")
 
     mod = test.filament_model()
@@ -868,6 +902,6 @@ def test_simple_filament_nodistance():
     npt.assert_allclose(test.skeleton_longpath, hdu[2].data > 0)
     npt.assert_allclose(mod, hdu[3].data)
 
-    os.remove("test1_image_output.fits")
+    # os.remove("test1_image_output.fits")
     hdu.close()
     del hdu

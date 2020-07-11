@@ -1,9 +1,0 @@
-numpy
-matplotlib
-Cython
-astropy-helpers
-astropy
-numpydoc
-scipy
-scikit-image
-networkx

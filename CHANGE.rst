@@ -1,5 +1,11 @@
 2.0 (unreleased)
 ----------------
+- #60 : Change longest path algorithm to catch unending loops from `networkx.shortest_simple_paths`. Note that this is not yet a general solution.
+
+1.7 (2020-04-01)
+----------------
+- #53 : Fix for netwroksx v2.4. Changed `Graph.node` to `Graph.nodes`. The former was removed.
+- #52 : Fixes for astropy v4.0. Start dropping py27 tests from travis.
 - #44 : Return end and intersection points from final skeletons.
 - #42 : Fix edge slicing issue raise in Issue 42 (https://github.com/e-koch/FilFinder/issues/42). Switched all slicing to use astropy.nddata.utils.extract_array, which correctly handles edges cases.
 

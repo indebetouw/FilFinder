@@ -464,7 +464,7 @@ def radial_profile(img, dist_transform_all, dist_transform_sep, offsets,
         except ValueError:
             print("No contour")
         plt.draw()
-        raw_input("?")
+        input("?")
         plt.clf()
 
     if len(width_distance) == 0:
@@ -476,7 +476,7 @@ def radial_profile(img, dist_transform_all, dist_transform_sep, offsets,
 
     # Binning
     if bins is None:
-        nbins = np.sqrt(len(width_value))
+        nbins = int(np.sqrt(len(width_value)))
         maxbin = np.max(width_distance)
         if bintype is "log":
             # bins must start at 1 if logspaced
