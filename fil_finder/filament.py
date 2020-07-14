@@ -681,7 +681,7 @@ class Filament2D(FilamentNDBase):
             # gradimage subimage corresponding to branch_array so extent of
             # pix+self.pixel_extents, padded by radius on each side
             pe=self.pixel_extents
-            if (gradimage<>None).any():
+            if (gradimage!=None).any():
                 gradim_array=self.image_slicer(gradimage,shape)
                 gradim_array=np.fliplr(gradim_array)
             else:

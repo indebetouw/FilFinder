@@ -46,7 +46,7 @@ def rht(mask, radius, ntheta=180, background_percentile=25, verbose=False, gradi
     '''
 
     pad_mask = np.pad(mask.astype(float), radius, padwithnans)
-    if (gradimage<>None).any():
+    if (gradimage!=None).any():
         dograd=True
         pad_gradimage=np.pad(gradimage.astype(float), radius, padwithnans)-np.nanmean(gradimage)
     else:

@@ -237,8 +237,8 @@ def filament_profile(skeleton, image, pixscale, max_dist=0.025 * u.pc,
             p.show()
             import pylab as pl
             pl.draw()
-            print profile_fit
-            print profile_fit_err*np.sqrt(red_chisq)
+            print(profile_fit)
+            print(profile_fit_err*np.sqrt(red_chisq))
             import pdb
             pdb.set_trace()
 
@@ -345,7 +345,7 @@ def walk_through_skeleton(skeleton, debug=False):
                             yy_inds = y + np.array([-1, -1,  0,  0,  1,  1])
                             xx_inds = x + np.array([ 0,  1,  0,  1,  0,  1])
                         else:
-                            print "skel too small in x"
+                            print("skel too small in x")
                             stop
                 else: # y=(ny-1)
                     if x>0:
@@ -363,7 +363,7 @@ def walk_through_skeleton(skeleton, debug=False):
                             yy_inds = y + np.array([-1, -1,  0,  0,  1,  1])
                             xx_inds = x + np.array([ 0,  1,  0,  1,  0,  1])
                         else:
-                            print "skel too small in x"
+                            print("skel too small in x")
                             stop
             else: #y==0
                 if y<(ny-1):
@@ -382,10 +382,10 @@ def walk_through_skeleton(skeleton, debug=False):
                             yy_inds = y + np.array([0,  0,  1,  1])
                             xx_inds = x + np.array([0,  1,  0,  1])
                         else:
-                            print "skel too small in x"
+                            print("skel too small in x")
                             stop
                 else:
-                    print "skel too small in y"
+                    print("skel too small in y")
                     stop
 
 
